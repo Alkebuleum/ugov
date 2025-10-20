@@ -1,0 +1,42 @@
+{
+  "name": "ugov-redesign-alke",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@polkadot/api": "^16.4.6",
+    "@polkadot/util": "^13.5.6",
+    "@polkadot/util-crypto": "^13.5.6",
+    "amvault-connect": "^0.1.1",
+    "clsx": "^2.1.0",
+    "date-fns": "^3.6.0",
+    "ethers": "^6.15.0",
+    "firebase": "^10.14.1",
+    "framer-motion": "^11.18.2",
+    "lucide-react": "^0.452.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-markdown": "^9.1.0",
+    "react-router-dom": "^6.23.1",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.10",
+    "@tailwindcss/typography": "^0.5.16",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.6",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.0"
+  }
+}

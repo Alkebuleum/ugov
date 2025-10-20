@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* -------- Base -------- */
+@layer base {
+
+  html,
+  body {
+    @apply bg-brand-bg text-ink antialiased;
+  }
+}
+
+/* -------- Components -------- */
+@layer components {
+
+  /* Cards */
+  .card {
+    @apply bg-brand-card rounded-2xl shadow-card border border-brand-line transition-transform duration-200;
+  }
+
+  .card:hover {
+    transform: translateY(-2px);
+  }
+
+  /* Nav */
+  .nav-link {
+    @apply text-slate hover:text-ink px-3 py-2 rounded-xl transition;
+  }
+
+  .nav-link.active {
+    @apply text-ink bg-brand-line/60;
+  }
+
+  /* Badges / Chips */
+  .badge {
+    @apply px-2.5 py-1 rounded-full text-xs font-semibold border border-brand-line;
+  }
+
+  .badge.status-Active {
+    @apply bg-brand-primary text-white border-transparent;
+  }
+
+  .badge.status-Submitted {
+    @apply bg-brand-accentSoft text-ink;
+  }
+
+  .badge.status-Deciding {
+    @apply bg-amber-100 text-amber-800 border-amber-200;
+  }
+
+  .badge.status-Rejected {
+    @apply bg-red-100 text-red-700 border-red-200;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-brand-line bg-white text-ink transition duration-200 hover:bg-brand-line/40 focus:outline-none focus:ring-3 focus:ring-brand-primary/40;
+  }
+
+  .btn-cta {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-brand-primary text-white shadow-card transition duration-200 hover:brightness-110 hover:shadow-hover focus:outline-none focus:ring-3 focus:ring-brand-primary/40;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-xl text-ink hover:bg-brand-line/40;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-red-600 text-white transition duration-200 hover:bg-red-700 focus:outline-none focus:ring-3 focus:ring-red-300;
+  }
+
+  /* Inputs */
+  .input,
+  .textarea,
+  .select {
+    @apply w-full px-3 py-2 rounded-xl border border-brand-line bg-white text-ink placeholder-slate focus:outline-none focus:ring-3 focus:ring-brand-primary/40;
+  }
+
+  .textarea {
+    @apply min-h-[120px];
+  }
+
+  .label {
+    @apply text-sm text-slate mb-1;
+  }
+
+  /* Avatars */
+  .avatar {
+    @apply inline-flex items-center justify-center rounded-full text-white font-semibold;
+  }
+
+  .avatar.s1 {
+    background: #27467F
+  }
+
+  /* brand.primarySoft */
+  .avatar.s2 {
+    background: #0EA5E9
+  }
+
+  .avatar.s3 {
+    background: #059669
+  }
+
+  .avatar.s4 {
+    background: #7C3AED
+  }
+}
+
+/* -------- Utilities -------- */
+@layer utilities {
+
+  /* Interactive hero glow that tracks pointer */
+  .hero {
+    --mx: 0px;
+    --my: 0px;
+    background:
+      radial-gradient(600px 200px at calc(50% + var(--mx)) calc(0% + var(--my)), rgba(31, 58, 107, 0.08), transparent 60%),
+      radial-gradient(300px 150px at calc(10% + var(--mx)) calc(30% + var(--my)), rgba(217, 203, 181, 0.20), transparent 60%);
+  }
+
+  /* Beige accent chip if you need a neutral tag */
+  .chip {
+    @apply inline-flex items-center gap-2 px-2.5 py-1 rounded-xl text-xs font-medium bg-brand-accentSoft text-ink border border-brand-line;
+  }
+
+  .chip--primary {
+    @apply bg-brand-primary text-white border-transparent;
+  }
+}

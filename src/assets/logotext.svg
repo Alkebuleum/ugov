@@ -1,0 +1,11 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 36" fill="none">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop stop-color="#1F3A6B"/><stop offset="1" stop-color="#D9CBB5"/></linearGradient></defs>
+  <g>
+    <circle cx="18" cy="18" r="14" fill="url(#g)"/>
+    <circle cx="18" cy="18" r="7" fill="#fff"/>
+    <path d="M13 18a5 5 0 1 0 10 0" stroke="#1F3A6B" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </g>
+  <text x="40" y="24" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="800" fill="#0f172a">uGov</text>
+</svg>

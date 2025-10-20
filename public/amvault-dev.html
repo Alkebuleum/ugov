@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>AmVault Dev Harness (Verbose)</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        body {
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+            padding: 20px;
+        }
+
+        .card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 16px;
+            max-width: 560px;
+            margin: 0 auto;
+        }
+
+        .row {
+            margin: 8px 0;
+        }
+
+        button {
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+            background: #111827;
+            color: #fff;
+        }
+
+        input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+        }
+
+        code {
+            background: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 6px;
+        }
+
+        pre {
+            background: #0b1020;
+            color: #d1e3ff;
+            padding: 10px;
+            border-radius: 10px;
+            overflow: auto;
+        }
+    </style>
+    <script type="module">
+        import { Wallet } from 'https://esm.sh/ethers@6'
+
+        const log = (...args) => { console.log('[amvault-dev]', ...args); const pre = document.getElementById('logs'); pre.textContent += args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') + '\n' }
+
+        const qp = new URLSearchParams(window.location.search)
+        const nonce = qp.get('nonce') || ''
+        const chainId = Number(qp.get('chainId') || '0')
+        const redirect = qp.get('redirect') || 'postmessage'
+        log('loaded with qp', { nonce, chainId, redirect })
+
+        function buildMessage(nonce) {
+            const domain = window.location.host
+            const origin = window.location.origin
+            const msg = [
+                domain + ' wants you to sign in with your account:',
+                '',
+                'App: uGov',
+                'Nonce: ' + nonce,
+                'URI: ' + origin,
+                'Chain ID: ' + chainId,
+                'Version: 1',
+            ].join('\n')
+            log('buildMessage', msg)
+            return msg
+        }
+
+        let wallet = Wallet.createRandom()
+        window._setPk = (v) => { try { wallet = new Wallet(v); document.getElementById('addr').textContent = wallet.address; log('pk set; addr', wallet.address) } catch (e) { alert('Bad private key') } }
+
+        async function sign() {
+            const msg = buildMessage(nonce)
+            const signature = await wallet.signMessage(msg)
+            const address = await wallet.getAddress()
+            const payload = { type: 'amvault:auth', address, signature, nonce, chainId }
+
+            // 1) Try postMessage
+            try { window.opener?.postMessage(payload, '*') } catch (e) { }
+
+            // 2) Storage bridge fallback (same-origin public/)
+            try { localStorage.setItem('amvault:payload', JSON.stringify(payload)) } catch (e) { }
+
+            // 3) Close
+            window.close()
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('nonce').textContent = nonce
+            document.getElementById('cid').textContent = String(chainId)
+            document.getElementById('addr').textContent = wallet.address
+            document.getElementById('setpk').addEventListener('change', (e) => window._setPk(e.target.value))
+            document.getElementById('sign').addEventListener('click', sign)
+        })
+    </script>
+</head>
+
+<body>
+    <div class="card">
+        <h3>AmVault Dev Harness (Verbose)</h3>
+        <div class="row">nonce: <code id="nonce"></code></div>
+        <div class="row">chainId: <code id="cid"></code></div>
+        <div class="row">Current address: <code id="addr"></code></div>
+        <div class="row"><input id="setpk" placeholder="Paste a DEV PRIVATE KEY (optional)" /></div>
+        <div class="row" style="margin-top:12px;"><button id="sign">Sign & Return</button></div>
+        <div class="row">
+            <pre id="logs"></pre>
+        </div>
+        <pre id="out"></pre>
+    </div>
+</body>
+
+</html>

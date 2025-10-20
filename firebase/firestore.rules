@@ -1,0 +1,11 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function server() { return request.auth.token.server == true; }
+    match /{document=**} {
+      allow read: if true; // public reads
+      allow write: if false; // lock down; use Functions to write in prod
+    }
+  }
+}
