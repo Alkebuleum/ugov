@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { useAuth } from './auth'
+import { useAuth } from 'amvault-connect'
 import { useToast } from '../components/Toast'
 
 /**
