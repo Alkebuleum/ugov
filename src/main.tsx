@@ -15,7 +15,6 @@ import { AuthProvider } from 'amvault-connect'
 import { ToastProvider } from './components/Toast'
 import { DAOProvider } from './lib/dao'
 import NewDAO from './pages/NewDAO'
-import AppFallback from './components/AppFallback'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import LoadingGate from './components/LoadingGate'
 

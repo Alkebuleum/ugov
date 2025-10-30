@@ -118,3 +118,6 @@ export const ERC20_ABI = [
     'function symbol() view returns (string)',
 ] as const
 
+export const AMID_REGISTRY_ABI = [
+    'function ownerToId(address) view returns (bytes32)'
+]

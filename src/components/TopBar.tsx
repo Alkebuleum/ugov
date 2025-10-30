@@ -1,7 +1,7 @@
 // src/components/TopBar.tsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { Menu, Wallet2, LogOut, ChevronDown, Plus, Copy, Check } from 'lucide-react'
+import { Menu, Wallet2, LogOut, ChevronDown, Plus, Copy, Check, Landmark } from 'lucide-react'
 import { useAuth } from 'amvault-connect'
 import { useDAO } from '../lib/dao'
 import { setUserPrefsByAmid } from '../lib/firebase'
@@ -145,31 +145,28 @@ export default function TopBar({ onMenu }: TopBarProps) {
               <Menu size={18} />
             </button>
 
-            <img src={logo} className="h-9 shrink-0" alt="uGov" />
+
+
+            <button onClick={() => nav('/')} className="shrink-0" title="Go to Overview">
+              <img src={logo} className="h-9" alt="uGov" />
+            </button>
+
 
             {/* DAO Selector or Create DAO */}
-            <div className="ml-2">
+            <div className="ml-1">
               {hasDAO ? (
                 <DaoSelector
                   daos={daos}
                   current={current ?? undefined}
-                  /*           onSelect={handleSelectDao}
-                            onCreate={() => nav('/daos/new')} */
                   onSelect={handleSelectDao}
                   onCreate={() => {
                     if (FLAGS.canCreateDAO) nav('/daos/new')
-                    else {
-                      // simple UX: toast if you have one, or alert fallback
-                      // toast.warn('DAO creation is disabled in v1')
-                      alert('DAO creation is disabled in version 1')
-                    }
+                    else alert('DAO creation is disabled in version 1')
                   }}
                 />
               ) : !loading ? (
                 <button
                   className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-brand-line hover:bg-brand-line/30 text-sm"
-                  /*     onClick={() => nav('/daos/new')}
-                      title="Create your first DAO" */
                   onClick={() => {
                     if (FLAGS.canCreateDAO) nav('/daos/new')
                     else alert('DAO creation is disabled in version 1')
@@ -177,10 +174,11 @@ export default function TopBar({ onMenu }: TopBarProps) {
                   disabled={!FLAGS.canCreateDAO}
                   title={FLAGS.canCreateDAO ? 'Create your first DAO' : 'Disabled in version 1'}
                 >
-                  <Plus size={16} /> Create DAO
+                  <Plus size={16} /> <span className="hidden sm:inline">Create DAO</span>
                 </button>
               ) : null}
             </div>
+
 
             {/* Main nav: disabled until a DAO exists */}
             <nav
@@ -271,6 +269,7 @@ export default function TopBar({ onMenu }: TopBarProps) {
                           onClick={() => {
                             setAinOpen(false)
                             signout()
+                            nav('/', { replace: true })
                           }}
                           title="Logout"
                         >
@@ -368,8 +367,13 @@ function DaoSelector({ daos, current, onSelect, onCreate }: DaoSelectorProps) {
         aria-expanded={open}
         title={current?.address ?? 'Choose DAO'}
       >
-        <span className="truncate max-w-[180px]">{label}</span>
+        <span className="block sm:hidden">
+          <Landmark size={16} className="opacity-70" />
+        </span>
+        <span className="hidden sm:block truncate max-w-[180px]">{label}</span>
         <ChevronDown size={16} className="opacity-70" />
+
+
       </button>
 
       {open && (

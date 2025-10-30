@@ -10,7 +10,7 @@ function makeNonce() {
     crypto.getRandomValues(b);
     return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
 }
-function requestPopup({ method, app, chainId, origin, amvaultUrl, payload, nonce = makeNonce(), timeoutMs = 50000, debug = false }) {
+function requestPopup({ method, app, chainId, origin, amvaultUrl, payload, nonce = makeNonce(), timeoutMs = 120000, debug = false }) {
     return new Promise((resolve, reject) => {
         try {
             const url = new URL(amvaultUrl);
@@ -115,7 +115,7 @@ export async function sendTransaction(req, opts) {
         origin,
         amvaultUrl: opts.amvaultUrl,
         payload,
-        timeoutMs: (_a = opts.timeoutMs) !== null && _a !== void 0 ? _a : 50000,
+        timeoutMs: (_a = opts.timeoutMs) !== null && _a !== void 0 ? _a : 120000,
         debug: !!opts.debug
     });
     if (!resp.ok)

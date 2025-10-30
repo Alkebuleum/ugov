@@ -17,3 +17,10 @@ git push origin main
 
 
 GitHub Actions auto-builds and deploys to Pages (custom domain: ugov.cc).
+
+
+## --------------------------- (below not part of deploy)
+
+## if amvault-connect is updated in npm package 
+npm outdated amvault-connect
+npm install amvault-connect@latest

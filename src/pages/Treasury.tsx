@@ -6,12 +6,18 @@ import { Banknote, Coins, Wallet2, PlusCircle, Pencil, Trash2, X, Check, Droplet
 import { doc, onSnapshot } from 'firebase/firestore'
 import { ethers } from 'ethers'
 import { getReadProvider } from '../lib/chain'
+import AuthInline from '../components/AuthInline'
+import { useAuth } from 'amvault-connect'
+import { getAINByOwner } from '../lib/chainReads'
 
 const ERC20_ABI = [
   'function balanceOf(address) view returns (uint256)',
   'function decimals() view returns (uint8)',
   'function symbol() view returns (string)',
 ]
+
+
+
 
 function shortAddr(a?: string, lead = 6, tail = 6) {
   if (!a) return ''
@@ -46,8 +52,30 @@ type ResolvedToken = {
 }
 
 export default function Treasury() {
+  const { session } = useAuth()
   const { current, loading } = useDAO()
   const daoId = current?.id ?? null
+
+  const [adminAIN, setAdminAIN] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!current?.admin) return
+
+    async function fetchAdminAIN() {
+      const result = await getAINByOwner(current.admin)
+      console.log('[Treasury] getAINByOwner result:', result)
+      setAdminAIN(result.ainString)
+    }
+
+    fetchAdminAIN()
+  }, [current?.admin])
+
+  const isAdmin =
+    adminAIN &&
+    session?.ain &&
+    adminAIN.toLowerCase() === session.ain.toLowerCase()
+
+
 
   // Live DAO doc => instant UI refresh after writes
   const [daoLive, setDaoLive] = useState<any | null>(null)
@@ -308,6 +336,15 @@ export default function Treasury() {
         </div>
       )}
 
+      {/* DEBUG OUTPUT */}
+      {/*  <div className="text-sm text-slate">
+        <div>Status: <code>{ainStatus}</code></div>
+        <div>Admin address: <code>{current?.admin || '(none)'}</code></div>
+        <div>Admin AIN from chain: <code>{adminAin || '(null)'}</code></div>
+        <div>Session AIN: <code>{session?.ain || '(null)'}</code></div>
+        <div>isAdmin: <code>{String(isAdmin)}</code></div>
+      </div> */}
+
       {/* Header */}
       <div className="card p-6">
         <div className="flex items-center justify-between">
@@ -337,25 +374,30 @@ export default function Treasury() {
 
       {/* Manage tokens */}
       <motion.section className="card p-5" initial={{ opacity: 0, y: 10 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <h2 className="text-xl font-semibold">Tracked assets</h2>
-          <div className="flex items-center gap-2">
-            <button className="btn" onClick={beginTrackAKE} disabled={updating || !canAddMore}>
-              <Droplets size={16} className="mr-2" /> Track AKE (native)
-            </button>
-            <button className="btn" onClick={beginTrackVoteToken} disabled={updating || !canAddMore}>
-              <PlusCircle size={16} className="mr-2" /> Track vote token
-            </button>
-            <button className="btn" onClick={beginAdd} disabled={updating || !canAddMore}>
-              <PlusCircle size={16} className="mr-2" /> Add token
-            </button>
-          </div>
+          {isAdmin && (
+            <AuthInline action="manage Assets" compact>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <button className="btn" onClick={beginTrackAKE} disabled={updating || !canAddMore}>
+                  <Droplets size={16} className="mr-2" /> Track AKE (native)
+                </button>
+                <button className="btn" onClick={beginTrackVoteToken} disabled={updating || !canAddMore}>
+                  <PlusCircle size={16} className="mr-2" /> Track vote token
+                </button>
+                <button className="btn" onClick={beginAdd} disabled={updating || !canAddMore}>
+                  <PlusCircle size={16} className="mr-2" /> Add token
+                </button>
+              </div>
+            </AuthInline>
+          )}
         </div>
+
 
         {!canAddMore && <div className="mt-3 text-xs text-slate">Limit reached (3). Edit or remove a token to add another.</div>}
 
         {/* Inline editor (no Balance field; chain-read) */}
-        {editingIndex !== null && (
+        {isAdmin && editingIndex !== null && (
           <div className="mt-4 border rounded-xl p-4 bg-brand-bg">
             <div className="grid md:grid-cols-6 gap-3">
               <div className="md:col-span-2 flex items-center gap-2">
@@ -436,19 +478,22 @@ export default function Treasury() {
                       <td className="py-3 pr-3 text-right">{r.priceUsd != null && !Number.isNaN(r.priceUsd) ? fmtUsd(r.priceUsd) : '—'}</td>
                       <td className="py-3 pr-3 text-right">{resolving ? '…' : Number.isFinite(valueUsd) ? fmtUsd(valueUsd) : '—'}</td>
                       <td className="py-3 pr-3 text-right">
-                        <div className="inline-flex items-center gap-2">
-                          <button className="btn" onClick={() => beginEdit(i)} disabled={updating}>
-                            <Pencil size={14} className="mr-1" /> Edit
-                          </button>
-                          {confirmDeleteIdx === i ? (
-                            <button className="btn bg-red-600 text-white" onClick={() => onRemove(i)} disabled={updating}>Confirm</button>
-                          ) : (
-                            <button className="btn" onClick={() => setConfirmDeleteIdx(i)} disabled={updating}>
-                              <Trash2 size={14} className="mr-1" /> Remove
+                        {isAdmin && (
+                          <div className="inline-flex items-center gap-2">
+                            <button className="btn" onClick={() => beginEdit(i)} disabled={updating}>
+                              <Pencil size={14} className="mr-1" /> Edit
                             </button>
-                          )}
-                        </div>
+                            {confirmDeleteIdx === i ? (
+                              <button className="btn bg-red-600 text-white" onClick={() => onRemove(i)} disabled={updating}>Confirm</button>
+                            ) : (
+                              <button className="btn" onClick={() => setConfirmDeleteIdx(i)} disabled={updating}>
+                                <Trash2 size={14} className="mr-1" /> Remove
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
+
                     </tr>
                   )
                 })}

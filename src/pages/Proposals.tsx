@@ -74,7 +74,7 @@ export default function Proposals() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Proposals</h1>
         <div className="flex items-center gap-2">
-          <button
+          {/*     <button
             className={`px-3 py-2 rounded-lg border ${mode === 'rows' ? 'bg-brand-line/50 border-brand-line' : 'border-transparent hover:bg-brand-line/40'
               }`}
             onClick={() => setMode('rows')}
@@ -87,7 +87,7 @@ export default function Proposals() {
             onClick={() => setMode('posts')}
           >
             Post View
-          </button>
+          </button> */}
           <Link className="btn-cta" to="/proposals/new">
             + Create Proposal
           </Link>
