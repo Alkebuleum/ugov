@@ -353,10 +353,11 @@ export default function Treasury() {
             <RotateCw size={16} className="mr-2" /> {resolving ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
-        <div className="mt-2 text-slate">
+        <div className="mt-2 text-slate break-words">
           Treasury address:&nbsp;
-          <span className="font-mono">{treasury ? treasury : '—'}</span>
+          <span className="font-mono break-all">{treasury ? treasury : '—'}</span>
         </div>
+
       </div>
 
       {/* Summary cards */}

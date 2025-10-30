@@ -12,7 +12,7 @@ npm run build
 ## Commit & push to main:
 
 git add -A
-git commit -m "feat: updated contracts"
+git commit -m "fix UX bugs"
 git push origin main
 
 

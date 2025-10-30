@@ -201,7 +201,7 @@ export default function TopBar({ onMenu }: TopBarProps) {
           </div>
 
           {/* Right: auth controls */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 shrink-0 mt-1 sm:mt-0">
             {!session ? (
               <button
                 className="btn inline-flex items-center"
