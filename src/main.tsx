@@ -22,7 +22,8 @@ function Layout() {
   const [open, setOpen] = React.useState(false)
   return (
     <>
-      <TopBar onMenu={() => setOpen(true)} />
+      <TopBar menuOpen={open} onMenu={() => setOpen(true)} />
+
       <MobileDrawer open={open} onClose={() => setOpen(false)} />
 
       <main className="max-w-6xl mx-auto px-4 py-6">

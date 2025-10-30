@@ -10,7 +10,8 @@ import logo from '../assets/logotext.svg'
 import type { DAO as DAOType } from '../lib/dao'
 import { FLAGS } from '../lib/flags'
 
-type TopBarProps = { onMenu?: () => void }
+//type TopBarProps = { onMenu?: () => void }
+type TopBarProps = { onMenu?: () => void; menuOpen?: boolean }
 
 function shortAddr(a: string, lead = 6, tail = 4) {
   if (!a) return ''
@@ -36,7 +37,9 @@ function seedFromString(s?: string): 1 | 2 | 3 | 4 {
   return ((h % 4) + 1) as 1 | 2 | 3 | 4
 }
 
-export default function TopBar({ onMenu }: TopBarProps) {
+
+
+export default function TopBar({ onMenu, menuOpen = false }: TopBarProps) {
   const nav = useNavigate()
   const loc = useLocation()
   const { session, signin, signout, status, error } = useAuth()
@@ -131,29 +134,39 @@ export default function TopBar({ onMenu }: TopBarProps) {
     nav(loc.pathname + loc.search, { replace: true })
   }
 
+  useEffect(() => {
+    if (menuOpen) setAinOpen(false)
+  }, [menuOpen])
+
+
   return (
-    <header className="topbar sticky top-0 z-40 bg-brand-bg/95 backdrop-blur supports-[backdrop-filter]:bg-brand-bg/80 border-b border-brand-line">
+    <header
+      className={
+        `topbar sticky top-0 ${menuOpen ? 'z-10 md:z-40' : 'z-40'} ` +
+        'bg-brand-bg/95 backdrop-blur supports-[backdrop-filter]:bg-brand-bg/80 border-b border-brand-line'
+      }
+    >
+
       <div className="max-w-6xl mx-auto px-4">
-        <div className="h-14 flex items-center justify-between gap-2">
-          {/* Left: menu + logo + nav */}
+        {/* ROW 1: menu/logo + (connect/ain) */}
+        <div className="min-h-14 py-2 flex items-center justify-between gap-2">
+          {/* Left: menu + logo + (desktop DAO selector) */}
           <div className="flex items-center gap-3 min-w-0">
             <button
               className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-xl border border-brand-line hover:bg-brand-line/40"
               onClick={onMenu}
               aria-label="Open menu"
+              aria-expanded={menuOpen}
             >
               <Menu size={18} />
             </button>
-
-
 
             <button onClick={() => nav('/')} className="shrink-0" title="Go to Overview">
               <img src={logo} className="h-9" alt="uGov" />
             </button>
 
-
-            {/* DAO Selector or Create DAO */}
-            <div className="ml-1">
+            {/* Desktop/Tablet: inline DAO selector */}
+            <div className="ml-1 hidden sm:block">
               {hasDAO ? (
                 <DaoSelector
                   daos={daos}
@@ -174,13 +187,12 @@ export default function TopBar({ onMenu }: TopBarProps) {
                   disabled={!FLAGS.canCreateDAO}
                   title={FLAGS.canCreateDAO ? 'Create your first DAO' : 'Disabled in version 1'}
                 >
-                  <Plus size={16} /> <span className="hidden sm:inline">Create DAO</span>
+                  <Plus size={16} /> <span className="hidden md:inline">Create DAO</span>
                 </button>
               ) : null}
             </div>
 
-
-            {/* Main nav: disabled until a DAO exists */}
+            {/* Main nav (desktop) */}
             <nav
               className={
                 'hidden md:flex items-center gap-1 ml-2 ' +
@@ -200,11 +212,11 @@ export default function TopBar({ onMenu }: TopBarProps) {
             </nav>
           </div>
 
-          {/* Right: auth controls */}
+          {/* Right: auth controls (stack on mobile) */}
           <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 shrink-0 mt-1 sm:mt-0">
             {!session ? (
               <button
-                className="btn inline-flex items-center"
+                className="btn inline-flex items-center shrink-0"
                 onClick={signin}
                 disabled={status === 'checking'}
                 title="Connect via AmVault"
@@ -213,102 +225,120 @@ export default function TopBar({ onMenu }: TopBarProps) {
                 {status === 'checking' ? 'Checking…' : 'Connect'}
               </button>
             ) : (
-              <>
-                {/* AIN Chip with identicon */}
-                <div className="relative">
-                  <button
-                    ref={ainBtnRef}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-brand-line bg-white/60 hover:bg-white transition text-sm"
-                    onClick={() => setAinOpen((v) => !v)}
-                    title="Account"
+              <div className="relative">
+                {/* AIN Chip with identicon (truncate to avoid overflow) */}
+                <button
+                  ref={ainBtnRef}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-brand-line bg-white/60 hover:bg-white transition text-sm max-w-[55vw] sm:max-w-none"
+                  onClick={() => setAinOpen((v) => !v)}
+                  title="Account"
+                >
+                  <Identicon value={ain || session.address} size={16} className="shrink-0" />
+                  <span className="font-medium truncate">{ain || shortAddr(session.address)}</span>
+                  <ChevronDown size={14} className="opacity-70 shrink-0" />
+                </button>
+
+                {ainOpen && (
+                  <div
+                    ref={ainPopRef}
+                    className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-brand-line bg-white/95 backdrop-blur shadow-lg p-3 z-50"
+                    role="dialog"
+                    aria-label="Account"
                   >
-                    <Identicon value={ain || session.address} size={16} className="shrink-0" />
-                    <span className="font-medium">{ain || '—'}</span>
-                    <ChevronDown size={14} className="opacity-70" />
-                  </button>
-
-                  {/* Popover: AIN + Wallet */}
-                  {ainOpen && (
-                    <div
-                      ref={ainPopRef}
-                      className="absolute right-0 mt-2 w-80 rounded-xl border border-brand-line bg-white/95 backdrop-blur shadow-lg p-3 z-50"
-                      role="dialog"
-                      aria-label="Account"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Identicon value={ain || session.address} size={28} className="shrink-0" />
-                        <div className="min-w-0">
-                          <div className="text-xs text-slate">AIN</div>
-                          <div className="font-mono text-sm truncate">{ain || '—'}</div>
-                        </div>
-                        <button
-                          className="ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg border hover:bg-brand-line/40"
-                          onClick={() => ain && copy(ain, 'ain')}
-                          disabled={!ain}
-                          title="Copy AIN"
-                        >
-                          {copied === 'ain' ? <Check size={14} /> : <Copy size={14} />} Copy
-                        </button>
+                    <div className="flex items-center gap-3">
+                      <Identicon value={ain || session.address} size={28} className="shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-xs text-slate">AIN</div>
+                        <div className="font-mono text-sm truncate">{ain || '—'}</div>
                       </div>
-
-                      <div className="mt-3 flex items-start gap-3">
-                        <div className="text-xs text-slate mt-0.5">Wallet</div>
-                        <div className="font-mono text-sm break-all">{session.address}</div>
-                        <button
-                          className="ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg border hover:bg-brand-line/40"
-                          onClick={() => copy(session.address, 'addr')}
-                          title="Copy address"
-                        >
-                          {copied === 'addr' ? <Check size={14} /> : <Copy size={14} />} Copy
-                        </button>
-                      </div>
-
-                      <div className="mt-3 flex justify-end">
-                        <button
-                          className="btn inline-flex items-center"
-                          onClick={() => {
-                            setAinOpen(false)
-                            signout()
-                            nav('/', { replace: true })
-                          }}
-                          title="Logout"
-                        >
-                          <LogOut size={16} className="mr-2" /> Logout
-                        </button>
-                      </div>
-
+                      <button
+                        className="ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg border hover:bg-brand-line/40"
+                        onClick={() => ain && copy(ain, 'ain')}
+                        disabled={!ain}
+                        title="Copy AIN"
+                      >
+                        {copied === 'ain' ? <Check size={14} /> : <Copy size={14} />} Copy
+                      </button>
                     </div>
-                  )}
-                </div>
 
+                    <div className="mt-3 flex items-start gap-3">
+                      <div className="text-xs text-slate mt-0.5">Wallet</div>
+                      <div className="font-mono text-sm break-all">{session.address}</div>
+                      <button
+                        className="ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg border hover:bg-brand-line/40"
+                        onClick={() => copy(session.address, 'addr')}
+                        title="Copy address"
+                      >
+                        {copied === 'addr' ? <Check size={14} /> : <Copy size={14} />} Copy
+                      </button>
+                    </div>
 
-              </>
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        className="btn inline-flex items-center"
+                        onClick={() => {
+                          setAinOpen(false)
+                          signout()
+                          nav('/', { replace: true })
+                        }}
+                        title="Logout"
+                      >
+                        <LogOut size={16} className="mr-2" /> Logout
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
 
-        {/* Auth error banner */}
+        {/* ROW 2 (mobile-only): full-width DAO selector */}
+        {/* ROW 2 (mobile-only): full-width DAO selector — hidden when menu is open */}
+
+        <div className="sm:hidden pb-2">
+          {hasDAO ? (
+            <DaoSelector
+              daos={daos}
+              current={current ?? undefined}
+              onSelect={handleSelectDao}
+              onCreate={() => {
+                if (FLAGS.canCreateDAO) nav('/daos/new')
+                else alert('DAO creation is disabled in version 1')
+              }}
+              fullWidth
+            />
+          ) : !loading ? (
+            <button
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-brand-line hover:bg-brand-line/30 text-sm"
+              onClick={() => {
+                if (FLAGS.canCreateDAO) nav('/daos/new')
+                else alert('DAO creation is disabled in version 1')
+              }}
+              disabled={!FLAGS.canCreateDAO}
+              title={FLAGS.canCreateDAO ? 'Create your first DAO' : 'Disabled in version 1'}
+            >
+              <Plus size={16} /> Create DAO
+            </button>
+          ) : null}
+        </div>
+
+
+
+        {/* Auth/runtime banners unchanged */}
         {error && (
           <div className="mb-2 -mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
             {error}
           </div>
         )}
-
-        {/* Runtime error banner (debug only) */}
         {runtimeError && isDebug() && (
-          <div className="mb-2 -mt-2 text-xs text-red-800 bg-red-50 border border-red-200 rounded px-3 py-2">
+          <div className="mb-2 -mt-2 text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
             <strong>Runtime error:</strong> {runtimeError}
-            <button
-              className="ml-3 underline"
-              onClick={() => setRuntimeError(null)}
-              aria-label="Clear runtime error"
-            >
+            <button className="ml-3 underline" onClick={() => setRuntimeError(null)} aria-label="Clear runtime error">
               Clear
             </button>
           </div>
         )}
-
-        {/* DAO debug status (debug only) */}
         {isDebug() && (
           <div className="mb-2 -mt-2 text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
             <strong>DAO debug</strong> · loading={String(loading)} · daos={daos.length} · current={current?.id ?? 'null'} · path={loc.pathname}
@@ -317,19 +347,23 @@ export default function TopBar({ onMenu }: TopBarProps) {
       </div>
     </header>
   )
+
 }
 
 /* -----------------------------------------------------------------------------
  * DAO Selector (inline)
  * ---------------------------------------------------------------------------*/
+
+
 type DaoSelectorProps = {
   daos: DAOType[]
   current?: DAOType
   onSelect: (dao: DAOType) => void
   onCreate: () => void
+  fullWidth?: boolean
 }
 
-function DaoSelector({ daos, current, onSelect, onCreate }: DaoSelectorProps) {
+function DaoSelector({ daos, current, onSelect, onCreate, fullWidth }: DaoSelectorProps) {
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement | null>(null)
   const popRef = useRef<HTMLDivElement | null>(null)
@@ -357,12 +391,15 @@ function DaoSelector({ daos, current, onSelect, onCreate }: DaoSelectorProps) {
   }, [open])
 
   return (
-    <div className="relative">
+    <div className={`relative ${fullWidth ? 'w-full' : ''}`}>
       <button
         ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-brand-line bg-transparent hover:bg-brand-line/30 text-sm whitespace-nowrap"
+        className={
+          'inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-brand-line bg-transparent hover:bg-brand-line/30 text-sm ' +
+          (fullWidth ? 'w-full justify-between' : 'whitespace-nowrap max-w-[220px]')
+        }
         aria-haspopup="listbox"
         aria-expanded={open}
         title={current?.address ?? 'Choose DAO'}
@@ -370,17 +407,17 @@ function DaoSelector({ daos, current, onSelect, onCreate }: DaoSelectorProps) {
         <span className="block sm:hidden">
           <Landmark size={16} className="opacity-70" />
         </span>
-        <span className="hidden sm:block truncate max-w-[180px]">{label}</span>
-        <ChevronDown size={16} className="opacity-70" />
-
-
+        <span className={`truncate ${fullWidth ? 'max-w-[70vw]' : 'max-w-[180px] sm:max-w-[200px]'}`}>
+          {label}
+        </span>
+        <ChevronDown size={16} className="opacity-70 shrink-0" />
       </button>
 
       {open && (
         <div
           ref={popRef}
           role="listbox"
-          className="absolute z-50 mt-2 w-64 rounded-xl border border-brand-line bg-white/95 backdrop-blur shadow-lg overflow-hidden"
+          className="absolute z-50 mt-2 w-[min(16rem,calc(100vw-2rem))] sm:w-64 rounded-xl border border-brand-line bg-white/95 backdrop-blur shadow-lg overflow-hidden right-0"
         >
           <div className="max-h-80 overflow-auto py-1">
             {daos.length === 0 && (
@@ -401,7 +438,7 @@ function DaoSelector({ daos, current, onSelect, onCreate }: DaoSelectorProps) {
                   aria-selected={isCurrent}
                   title={d.address}
                 >
-                  <span className="truncate">{d.name ?? shortAddr(d.address)}</span>
+                  <span className="truncate max-w-[12rem]">{d.name ?? shortAddr(d.address)}</span>
                   {isCurrent && <span className="text-xs ml-2 opacity-70">current</span>}
                 </button>
               )
@@ -422,3 +459,4 @@ function DaoSelector({ daos, current, onSelect, onCreate }: DaoSelectorProps) {
     </div>
   )
 }
+
