@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createProposal } from '../lib/firebase'
+import { createProposal, updateProposal } from '../lib/firebase'
 import { useRequireAuth } from '../lib/requireAuth'
 import { useDAO } from '../lib/dao'
 import Markdown from '../lib/markdown'
@@ -66,6 +66,24 @@ function isHex(s: string) {
 const shortAddr = (a?: string, lead = 6, tail = 4) =>
   !a ? 'Anon' : a.slice(0, lead) + '…' + a.slice(-tail)
 
+
+function stripAutoHeader(full?: string): string {
+  if (!full) return ''
+  const lines = full.split('\n')
+
+  // We only strip if it *looks* like our auto header: "# Title" on first line
+  const first = lines[0] || ''
+  if (!first.startsWith('# ')) return full
+
+  // Find first completely blank line after header block
+  const blankIdx = lines.findIndex((l, i) => i > 0 && l.trim() === '')
+  if (blankIdx === -1) return full
+
+  // Everything after that blank line is treated as the real body
+  return lines.slice(blankIdx + 1).join('\n')
+}
+
+
 export default function NewProposal() {
   const { session, status } = useRequireAuth()
   const { current } = useDAO()
@@ -76,24 +94,66 @@ export default function NewProposal() {
   const [tab, setTab] = useState<'edit' | 'preview'>('edit')
   const loc = useLocation() as any
 
+  const prefill = (loc as any)?.state?.prefill || {};
+  const editId = (prefill?.proposalId as string | undefined) || undefined
+  const isEditMode = !!editId
+  const reservedId = prefill.reservedId;
+
   useEffect(() => {
-    const pf = loc?.state?.prefill
+    const pf = (loc as any)?.state?.prefill
     if (!pf) return
+
     setForm(f => ({
       ...f,
-      // only overwrite the fields we know
-      category: 'EMERGENCY_CANCEL',
+      // use category from prefill if provided, otherwise keep current
+      ...(pf.category ? { category: pf.category as CategoryCode } : {}),
+
+      // core fields
       title: pf.title ?? f.title,
       summary: pf.summary ?? f.summary,
       tags: pf.tags ?? f.tags,
-      body: pf.body ?? f.body,
+      body: pf.body ? stripAutoHeader(pf.body) : f.body,
+
+      // Budget
+      budgetAmount:
+        pf.budget?.amount != null
+          ? String(pf.budget.amount)
+          : f.budgetAmount,
+      budgetAsset: pf.budget?.asset ?? f.budgetAsset,
+      recipient: pf.budget?.recipient ?? f.recipient,
+
+      // Voting config
+      votingDelayBlocks:
+        pf.votingDelayBlocks != null
+          ? String(pf.votingDelayBlocks)
+          : f.votingDelayBlocks,
+      votingPeriodBlocks:
+        pf.votingPeriodBlocks != null
+          ? String(pf.votingPeriodBlocks)
+          : f.votingPeriodBlocks,
+      quorumBps:
+        pf.quorumBps != null ? String(pf.quorumBps) : f.quorumBps,
+      treasuryTimelockSec:
+        pf.treasuryTimelockSec != null
+          ? String(pf.treasuryTimelockSec)
+          : f.treasuryTimelockSec,
+
+      // Other action payloads
+      newAdmin: pf.newAdmin ?? f.newAdmin,
+      newToken: pf.newToken ?? f.newToken,
       cancelTargetId: pf.cancelTargetId ?? f.cancelTargetId,
+
+      // meta
+      discussionUrl: pf.discussionUrl ?? f.discussionUrl,
+      references: pf.references ?? f.references,
     }))
-    // optional: clear the state so a refresh doesn't re-apply
+
     if (history.replaceState) {
       history.replaceState({}, document.title, location.pathname)
     }
-  }, [loc?.state])
+  }, [loc])
+
+
 
 
   // Autosave per-DAO
@@ -279,7 +339,7 @@ export default function NewProposal() {
     return `${header.filter(Boolean).join('\n')}\n\n${form.body}`
   }, [form, isBudget, isVotingCfg, isSetAdmin, isSetVoteToken])
 
-  async function onSubmit(e: React.FormEvent) {
+  /* async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     const err = validate()
@@ -393,7 +453,190 @@ export default function NewProposal() {
     } finally {
       setLoading(false)
     }
+  } */
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    const err = validate()
+    if (err) { setError(err); return }
+
+    setLoading(true)
+    try {
+      const category = form.category as CategoryCode
+
+      const tagsArray = form.tags
+        .split(',')
+        .map(t => t.trim())
+        .filter(Boolean)
+
+      const refsArray = form.references
+        ? form.references.split('\n').map(s => s.trim()).filter(Boolean)
+        : []
+
+      // 🔹 EDIT MODE: update existing draft, no new on-chain reserve
+      if (editId) {
+        const patch: any = {
+          title: form.title.trim(),
+          summary: form.summary.trim(),
+          category,
+          tags: tagsArray,
+          bodyMd: previewMd,
+          discussionUrl: form.discussionUrl || null,
+          references: refsArray,
+
+          // Category-specific fields, same logic as create
+          ...(category === 'BUDGET' && isNonEmpty(form.budgetAmount) && form.budgetAsset && isNonEmpty(form.recipient)
+            ? {
+              budget: {
+                amount: Number(form.budgetAmount),
+                asset: form.budgetAsset,
+                recipient: form.recipient.trim(),
+              },
+            }
+            : { budget: null }),
+
+          ...(category === 'VOTING_CONFIG'
+            ? {
+              ...(numOrUndef(form.votingDelayBlocks) != null
+                ? { votingDelayBlocks: numOrUndef(form.votingDelayBlocks)! }
+                : {}),
+              ...(numOrUndef(form.votingPeriodBlocks) != null
+                ? { votingPeriodBlocks: numOrUndef(form.votingPeriodBlocks)! }
+                : {}),
+              ...(numOrUndef(form.quorumBps) != null
+                ? { quorumBps: numOrUndef(form.quorumBps)! }
+                : {}),
+              ...(numOrUndef(form.treasuryTimelockSec) != null
+                ? { treasuryTimelockSec: numOrUndef(form.treasuryTimelockSec)! }
+                : {}),
+            }
+            : {}),
+
+          ...(category === 'EMERGENCY_CANCEL' && isNonEmpty(form.cancelTargetId)
+            ? { cancelTargetId: String(form.cancelTargetId) }
+            : {}),
+
+          ...(category === 'SET_ADMIN' && isNonEmpty(form.newAdmin)
+            ? { newAdmin: form.newAdmin!.trim() }
+            : { newAdmin: null }),
+
+          ...(category === 'SET_VOTE_TOKEN' && isNonEmpty(form.newToken)
+            ? { newToken: form.newToken!.trim() }
+            : { newToken: null }),
+        }
+
+        await updateProposal(editId, patch)
+        localStorage.removeItem(STORAGE_KEY)
+        nav(`/proposals/${editId}`)
+        return
+      }
+
+      // 🔹 CREATE MODE: original flow (reserve + create)
+      const metaForRef: any = {
+        dao: current.address,
+        title: form.title.trim(),
+        summary: form.summary.trim(),
+        category: form.category,
+        tags: form.tags,
+        author: session.address,
+        createdAt: Date.now(),
+      }
+      if (isBudget) {
+        metaForRef.budget = {
+          amount: Number(form.budgetAmount),
+          asset: form.budgetAsset,
+          recipient: form.recipient?.trim(),
+        }
+      }
+      if (isVotingCfg) {
+        metaForRef.votingDelayBlocks = Number(form.votingDelayBlocks)
+        metaForRef.votingPeriodBlocks = Number(form.votingPeriodBlocks)
+        metaForRef.quorumBps = Number(form.quorumBps)
+        metaForRef.treasuryTimelockSec = Number(form.treasuryTimelockSec)
+      }
+      if (isEmergencyCancel) {
+        metaForRef.cancelTargetId = Number(form.cancelTargetId)
+      }
+      if (isSetAdmin) metaForRef.newAdmin = form.newAdmin?.trim()
+      if (isSetVoteToken) metaForRef.newToken = form.newToken?.trim()
+
+      const offchainRef = computeOffchainRef(metaForRef)
+      const descriptionHash = computeDescriptionHash(previewMd)
+
+      let onchainLocalId: string | null = null
+      try {
+        const out = await reserveDraftOnchain(current.address, offchainRef, { timeoutMs: 120_000 })
+        onchainLocalId = out.localId
+      } finally {
+      }
+
+      await createProposal(current.id, {
+        title: form.title.trim(),
+        summary: form.summary.trim(),
+        category,
+        tags: tagsArray,
+        bodyMd: previewMd,
+
+        ...(category === 'BUDGET' && isNonEmpty(form.budgetAmount) && form.budgetAsset && isNonEmpty(form.recipient)
+          ? {
+            budget: {
+              amount: Number(form.budgetAmount),
+              asset: form.budgetAsset,
+              recipient: form.recipient.trim(),
+            },
+          }
+          : {}),
+
+        ...(category === 'VOTING_CONFIG'
+          ? {
+            ...(numOrUndef(form.votingDelayBlocks) != null
+              ? { votingDelayBlocks: numOrUndef(form.votingDelayBlocks)! }
+              : {}),
+            ...(numOrUndef(form.votingPeriodBlocks) != null
+              ? { votingPeriodBlocks: numOrUndef(form.votingPeriodBlocks)! }
+              : {}),
+            ...(numOrUndef(form.quorumBps) != null ? { quorumBps: numOrUndef(form.quorumBps)! } : {}),
+            ...(numOrUndef(form.treasuryTimelockSec) != null
+              ? { treasuryTimelockSec: numOrUndef(form.treasuryTimelockSec)! }
+              : {}),
+          }
+          : {}),
+
+        ...(category === 'EMERGENCY_CANCEL' && isNonEmpty(form.cancelTargetId)
+          ? { cancelTargetId: Number(form.cancelTargetId) }
+          : {}),
+
+        ...(category === 'SET_ADMIN' && isNonEmpty(form.newAdmin) ? { newAdmin: form.newAdmin!.trim() } : {}),
+        ...(category === 'SET_VOTE_TOKEN' && isNonEmpty(form.newToken) ? { newToken: form.newToken!.trim() } : {}),
+
+        daoAddress: current.address,
+        ...(offchainRef ? { offchainRef: offchainRef as `0x${string}` } : {}),
+        descriptionHash: null, // you can switch to descriptionHash later if you want
+        ...(onchainLocalId ? { reservedId: onchainLocalId } : {}),
+        onchainReserved: true,
+
+        discussionUrl: form.discussionUrl || null,
+        references: refsArray,
+
+        author: {
+          name: session.ain,
+          address: session.address,
+          avatar: Math.max(1, (parseInt((session.address || '0x0').slice(2, 10), 16) % 4) + 1),
+        },
+        daoName: current.name ?? null,
+      })
+
+      localStorage.removeItem(STORAGE_KEY)
+      nav('/proposals')
+    } catch (err: any) {
+      console.error('[proposal:create] failed:', err)
+      setError(err?.message || 'Submission failed.')
+    } finally {
+      setLoading(false)
+    }
   }
+
 
   const titleCount = `${form.title.length}/${MAX_TITLE}`
   const summaryCount = `${form.summary.length}/${MAX_SUMMARY}`
@@ -401,7 +644,9 @@ export default function NewProposal() {
   return (
     <div className="card p-6 max-w-3xl">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-semibold">Create Proposal</h1>
+        <h1 className="text-2xl font-semibold">
+          {isEditMode ? 'Edit Proposal' : 'Create Proposal'}
+        </h1>
         <div className="text-xs text-slate-500">Draft autosaved • Cmd/Ctrl+Enter to publish</div>
       </div>
 
@@ -643,18 +888,35 @@ export default function NewProposal() {
           </div>
         )}
 
-        {/* Reserve on-chain now (required) */}
-        <div className="flex items-center gap-2 opacity-70">
-          <input id="reserveOnchain" type="checkbox" className="checkbox" checked readOnly disabled />
-          <label htmlFor="reserveOnchain" className="text-sm text-slate-700">
-            Reserve on-chain proposal number (required)
-          </label>
-        </div>
+        {/* Reserve on-chain now (create mode only) */}
+        {!isEditMode && (
+          <div className="flex items-center gap-2 opacity-70">
+            <input
+              id="reserveOnchain"
+              type="checkbox"
+              className="checkbox"
+              checked
+              readOnly
+              disabled
+            />
+            <label htmlFor="reserveOnchain" className="text-sm text-slate-700">
+              Reserve on-chain proposal number (required)
+            </label>
+          </div>
+        )}
+
+        {isEditMode && loc?.state?.prefill?.reservedId && (
+          <div className="text-xs text-slate-500">
+            On-chain proposal number already reserved: #{loc.state.prefill.reservedId}
+          </div>
+        )}
+
 
         <div className="flex items-center gap-2">
           <button className="btn-cta" type="submit" disabled={loading}>
-            {loading ? 'Publishing…' : 'Publish'}
+            {loading ? (isEditMode ? 'Updating…' : 'Publishing…') : (isEditMode ? 'Save Changes' : 'Publish')}
           </button>
+
           <button
             className="px-4 py-2 rounded-xl border border-brand-line"
             type="button"

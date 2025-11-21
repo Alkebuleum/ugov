@@ -1,7 +1,7 @@
 // src/pages/ProposalDetail.tsx
 // imports (top of detail page file)
 //import { preOpenAmvaultPopup, closeSharedPopup, closePopupThenNav } from '../lib/amvaultPopup'
-import { sendTransaction } from 'amvault-connect'
+
 import {
   buildActionsFromDraft,
   buildActionsFromDraftAsync,
@@ -49,7 +49,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import Markdown from '../lib/markdown'
-import { formatLocalId } from '../lib/format'
+import { formatLocalId, formatTimeAgo } from '../lib/format'
 //import Avatar from '../components/Avatar'
 import StatusChip from '../components/StatusChip'
 import { submitForVoteOnchain, computeOffchainRef, computeDescriptionHash, simulateSubmitForVote } from '../lib/daoProposals'
@@ -263,7 +263,12 @@ export default function ProposalDetail() {
   }
 
 
-
+  function stripAutoHeader(full: string | undefined): string {
+    if (!full) return ''
+    const idx = full.indexOf('\n\n') // header + "\n\n" + body
+    if (idx === -1) return full
+    return full.slice(idx + 2)
+  }
 
 
 
@@ -686,6 +691,11 @@ export default function ProposalDetail() {
   };
 
 
+  const updatedAt = (item?.updatedAt ?? item?.createdAt) as any
+  const isDraft = ((item?.status as string | undefined) || '').toLowerCase() === 'draft'
+  const timeLabel = updatedAt
+    ? `${isDraft ? 'Last edited' : 'Updated'} ${formatTimeAgo(updatedAt)}`
+    : ''
 
 
   const onShareClick = async () => {
@@ -1124,8 +1134,12 @@ export default function ProposalDetail() {
     }
     if (item.budget?.amount) {
       header.push(`**Requested Budget:** ${item.budget.amount} ${item.budget.asset}`)
-      if (item.budget.recipient) header.push(`**Recipient:** \`${item.budget.recipient}\``)
+      if (item.budget.recipient) {
+        // no inline-code here so mobile can wrap naturally
+        header.push(`**Recipient:** ${item.budget.recipient}`)
+      }
     }
+
     if (item.discussionUrl) header.push(`**Discussion:** ${item.discussionUrl}`)
     if (Array.isArray(item.references) && item.references.length) {
       header.push('', '**References:**', ...item.references.map((u: string) => `- ${u}`))
@@ -1758,20 +1772,26 @@ export default function ProposalDetail() {
           <p className="mt-2 mb-1 text-slate">{item.summary}</p>
         )}
 
-        {/*   <div className="mt-2 flex items-center gap-2 text-sm text-slate">
-          <Avatar name={authorName} seed={authorSeed} />
-          <span className="font-medium">{authorName}</span>
-          <span>·</span>
-          <Clock8 size={14} />
-          <span>{createdAtText}</span>
-        </div> */}
-        <IdentityChip
-          ain={item?.author?.name}
-          verified={!!item?.author?.verified}
-          size="md"
-          outlined={false}     // default, can omit
-          copyable={false}     // default, can omit
-        />
+        {/* Author */}
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-slate-600">
+          <IdentityChip
+            ain={item.author?.name}
+            verified={!!item.author?.verified}
+            size="sm"
+            outlined={false}
+            copyable={false}
+          />
+
+          {timeLabel && (
+            <>
+              <span className="opacity-40">•</span>
+              <span className="whitespace-nowrap opacity-70">
+                {timeLabel}
+              </span>
+            </>
+          )}
+        </div>
+
 
         {/* Tags (new) */}
         {Array.isArray(item.tags) && item.tags.length > 0 && (
@@ -2124,6 +2144,47 @@ export default function ProposalDetail() {
               </>
             ) : (
               <>
+                {isAuthor && (
+                  <button
+                    type="button"
+                    className="px-3 py-2 rounded-xl border border-brand-line hover:bg-brand-line/40 mr-2"
+                    onClick={() => {
+
+                      nav('/proposals/new', {
+                        state: {
+                          prefill: {
+                            proposalId: id,
+                            reservedId: item.reservedId,
+                            title: item.title,
+                            summary: item.summary,
+                            category: item.category,
+                            tags: Array.isArray(item.tags) ? item.tags.join(', ') : '',
+                            body: stripAutoHeader(item.bodyMd),
+
+                            // category-specific
+                            budget: item.budget || null,
+                            votingDelayBlocks: item.votingDelayBlocks,
+                            votingPeriodBlocks: item.votingPeriodBlocks,
+                            quorumBps: item.quorumBps,
+                            treasuryTimelockSec: item.treasuryTimelockSec,
+                            newAdmin: item.newAdmin,
+                            newToken: item.newToken,
+                            cancelTargetId: item.cancelTargetId ? String(item.cancelTargetId) : '',
+
+                            // meta
+                            discussionUrl: item.discussionUrl || '',
+                            references: Array.isArray(item.references)
+                              ? item.references.join('\n')
+                              : '',
+                          },
+                        },
+                      })
+                    }}
+                  >
+                    Edit draft
+                  </button>
+                )}
+
                 <button
                   className="btn"
                   disabled={promoting || !isAuthor}
@@ -2140,6 +2201,7 @@ export default function ProposalDetail() {
                   <Rocket size={16} className="mr-2" />
                   {promoting ? 'Sending…' : 'Submit for Vote'}
                 </button>
+
                 {isAuthor && (
                   <div className="text-slate text-sm">Draft in discussion</div>
                 )}
@@ -2148,6 +2210,7 @@ export default function ProposalDetail() {
                 )}
               </>
             )}
+
 
             {/* right-side actions */}
             <div className="ml-auto flex items-center gap-2">
@@ -2218,7 +2281,7 @@ export default function ProposalDetail() {
             viewport={{ once: true }}
           >
             <h2 className="text-xl font-semibold mb-3">Overview</h2>
-            <div className="prose max-w-none text-slate">
+            <div className="prose max-w-none text-slate break-words [&_code]:break-all">
               {item.bodyMd ? <Markdown>{item.bodyMd}</Markdown> : <p>No description.</p>}
             </div>
 

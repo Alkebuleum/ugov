@@ -510,6 +510,8 @@ export default function Overview() {
                 reservedId: r.reservedId ?? r.id,                 // show nice left-rail #
                 title: r.title,
                 status: r.status,
+                createdAt: r.createdAt,
+                updatedAt: r.updatedAt,
                 // choose one of these amount inputs:
                 amountText: r.amount,                       // e.g. "57.54K USDC" (string)
                 // OR use numeric+unit if you have them:
