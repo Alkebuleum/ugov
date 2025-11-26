@@ -6,11 +6,27 @@ import { useDAO } from '../lib/dao'
 import Markdown from '../lib/markdown'
 import { reserveDraftOnchain, computeOffchainRef, computeDescriptionHash } from '../lib/daoProposals'
 
+const BANK_ACTIONS = [
+  { value: 'SPEND', label: 'Spend from bank account' },
+  { value: 'CONFIG', label: 'Update account / settings' },
+  { value: 'CREATE', label: 'Create new bank account(s)' },
+  { value: 'CLOSE', label: 'Close bank account' },
+] as const
+
+type BankAction = (typeof BANK_ACTIONS)[number]['value']
+
+type BankNewAccountRow = {
+  account: string   // id / name
+  asset: string
+  note: string
+}
+
+const MAX_BANK_NEW_ACCOUNTS = 5
 
 type FormState = {
   title: string
   summary: string
-  category: 'BUDGET' | 'VOTING_CONFIG' | 'SET_ADMIN' | 'SET_VOTE_TOKEN' | 'EMERGENCY_CANCEL'
+  category: 'BUDGET' | 'VOTING_CONFIG' | 'SET_ADMIN' | 'SET_VOTE_TOKEN' | 'EMERGENCY_CANCEL' | 'BANK'
   tags: string
   body: string
 
@@ -22,7 +38,7 @@ type FormState = {
   // VOTING_CONFIG
   votingDelayBlocks?: string
   votingPeriodBlocks?: string
-  quorumBps?: string // absolute quorum, basis points (e.g. 1000 == 10.00%)
+  quorumBps?: string
   treasuryTimelockSec?: string
 
   // SET_ADMIN
@@ -34,10 +50,23 @@ type FormState = {
   // EMERGENCY_CANCEL
   cancelTargetId?: string
 
+  // BANK (single-action fields)
+  bankAction?: BankAction
+  bankAccount?: string
+  bankAmount?: string
+  bankAsset?: string
+  bankRecipient?: string
+  bankNote?: string
+
+  // BANK (multi-create)
+  bankNewAccounts: BankNewAccountRow[]
+
   // meta
   references?: string
   discussionUrl?: string
 }
+
+
 
 
 
@@ -48,6 +77,7 @@ const UI_CATEGORIES = [
   { code: 'SET_ADMIN', label: 'Rotate Admin' },
   { code: 'SET_VOTE_TOKEN', label: 'Change Vote Token' },
   { code: 'EMERGENCY_CANCEL', label: 'Emergency Cancellation' },
+  { code: 'BANK', label: 'DAO Bank (spend / accounts)' },      // 👈 NEW
 ] as const
 type CategoryCode = (typeof UI_CATEGORIES)[number]['code']
 
@@ -143,6 +173,19 @@ export default function NewProposal() {
       newToken: pf.newToken ?? f.newToken,
       cancelTargetId: pf.cancelTargetId ?? f.cancelTargetId,
 
+      // BANK (multi-create)
+      bankNewAccounts:
+        Array.isArray(pf.bank?.createAccounts) && pf.bank.createAccounts.length
+          ? pf.bank.createAccounts.map((r: any) => ({
+            account: r.account ?? '',
+            asset: r.asset ?? ASSETS[0],
+            note: r.note ?? '',
+          }))
+          : (f.bankNewAccounts?.length
+            ? f.bankNewAccounts
+            : [{ account: '', asset: ASSETS[0], note: '' }]),
+
+
       // meta
       discussionUrl: pf.discussionUrl ?? f.discussionUrl,
       references: pf.references ?? f.references,
@@ -178,7 +221,19 @@ export default function NewProposal() {
       references: '',
       discussionUrl: '',
       cancelTargetId: '',
+
+      // BANK
+      bankAction: undefined,
+      bankAccount: '',
+      bankAmount: '',
+      bankAsset: ASSETS[0],
+      bankRecipient: '',
+      bankNote: '',
+      bankNewAccounts: [
+        { account: '', asset: ASSETS[0], note: '' },
+      ],
     }
+
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       return raw ? { ...base, ...(JSON.parse(raw) as FormState) } : base
@@ -235,6 +290,7 @@ export default function NewProposal() {
   const isSetAdmin = form.category === 'SET_ADMIN'
   const isSetVoteToken = form.category === 'SET_VOTE_TOKEN'
   const isEmergencyCancel = form.category === 'EMERGENCY_CANCEL'
+  const isBank = form.category === 'BANK'
 
 
   function validate(): string | null {
@@ -251,6 +307,42 @@ export default function NewProposal() {
       if (!form.recipient?.trim()) return 'Recipient address is required.'
       if (!isEthAddr(form.recipient.trim())) return 'Recipient must be a valid 0x address.'
     }
+
+    if (isBank) {
+      if (!form.bankAction) return 'Select a bank action (spend / update / create / close).'
+
+      if (form.bankAction === 'SPEND') {
+        if (!form.bankAccount?.trim()) return 'Bank account is required.'
+        if (!form.bankAmount?.trim()) return 'Bank amount is required.'
+        if (isNaN(Number(form.bankAmount))) return 'Bank amount must be a number.'
+        if (!form.bankAsset?.trim()) return 'Please choose a bank asset.'
+        if (!form.bankRecipient?.trim()) return 'Bank recipient address is required.'
+        if (!isEthAddr(form.bankRecipient.trim())) return 'Bank recipient must be a valid 0x address.'
+      }
+
+      if (form.bankAction === 'CONFIG') {
+        if (!form.bankAccount?.trim()) return 'Bank account is required for configuration.'
+        if (!form.bankNote?.trim()) return 'Describe the bank account update.'
+      }
+
+      if (form.bankAction === 'CLOSE') {
+        if (!form.bankAccount?.trim()) return 'Bank account is required to close.'
+      }
+
+      if (form.bankAction === 'CREATE') {
+        const rows = form.bankNewAccounts || []
+        const used = rows.filter(r => r.account.trim())
+        if (!used.length) return 'Add at least one bank account to create.'
+        if (used.length > MAX_BANK_NEW_ACCOUNTS) {
+          return `You can create at most ${MAX_BANK_NEW_ACCOUNTS} accounts per proposal.`
+        }
+        const badAsset = used.find(r => !r.asset?.trim())
+        if (badAsset) return 'Each new account must have an asset selected.'
+      }
+    }
+
+
+
 
     if (isVotingCfg) {
       if (!form.votingDelayBlocks?.trim()) return 'Voting delay (blocks) is required.'
@@ -313,6 +405,38 @@ export default function NewProposal() {
       if (form.recipient) header.push(`**Recipient:** \`${form.recipient}\``)
     }
 
+    if (isBank) {
+      if (form.bankAction === 'SPEND') {
+        header.push(
+          `**Bank Action:** Spend ${form.bankAmount || '?'} ${form.bankAsset || ''} ` +
+          `from account "${form.bankAccount || '?'}" to \`${form.bankRecipient || '0x…'}\``
+        )
+      } else if (form.bankAction === 'CONFIG') {
+        header.push(
+          `**Bank Action:** Update account "${form.bankAccount || '?'}"${form.bankNote ? ` – ${form.bankNote}` : ''
+          }`
+        )
+      } else if (form.bankAction === 'CLOSE') {
+        header.push(
+          `**Bank Action:** Close account "${form.bankAccount || '?'}"`
+        )
+      } else if (form.bankAction === 'CREATE') {
+        const used = (form.bankNewAccounts || []).filter(r => r.account.trim())
+        if (used.length) {
+          header.push('**Bank Action:** Create new account(s):')
+          used.slice(0, MAX_BANK_NEW_ACCOUNTS).forEach((row, idx) => {
+            header.push(
+              `- #${idx + 1}: "${row.account}" (${row.asset || 'AKE'})${row.note ? ` – ${row.note}` : ''
+              }`
+            )
+          })
+        }
+      }
+    }
+
+
+
+
     if (isVotingCfg) {
       if (form.votingDelayBlocks) header.push(`**Voting Delay:** ${form.votingDelayBlocks} blocks`)
       if (form.votingPeriodBlocks) header.push(`**Voting Period:** ${form.votingPeriodBlocks} blocks`)
@@ -337,123 +461,9 @@ export default function NewProposal() {
     if (refs) header.push('', '**References:**', refs)
 
     return `${header.filter(Boolean).join('\n')}\n\n${form.body}`
-  }, [form, isBudget, isVotingCfg, isSetAdmin, isSetVoteToken])
-
-  /* async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setError(null)
-    const err = validate()
-    if (err) { setError(err); return }
-
-    setLoading(true)
-    try {
-      // Build offchainRef + description hash
-      const metaForRef: any = {
-        dao: current.address,
-        title: form.title.trim(),
-        summary: form.summary.trim(),
-        category: form.category,
-        tags: form.tags,
-        author: session.address,
-        createdAt: Date.now(),
-      }
-      if (isBudget) {
-        metaForRef.budget = {
-          amount: Number(form.budgetAmount),
-          asset: form.budgetAsset,
-          recipient: form.recipient?.trim(),
-        }
-      }
-      if (isVotingCfg) {
-        metaForRef.votingDelayBlocks = Number(form.votingDelayBlocks)
-        metaForRef.votingPeriodBlocks = Number(form.votingPeriodBlocks)
-        metaForRef.quorumBps = Number(form.quorumBps)
-        metaForRef.treasuryTimelockSec = Number(form.treasuryTimelockSec)
-
-      }
-      if (isEmergencyCancel) {
-        metaForRef.cancelTargetId = Number(form.cancelTargetId)
-      }
-      if (isSetAdmin) metaForRef.newAdmin = form.newAdmin?.trim()
-      if (isSetVoteToken) metaForRef.newToken = form.newToken?.trim()
-
-      const offchainRef = computeOffchainRef(metaForRef)
-      const descriptionHash = computeDescriptionHash(previewMd)
-
-      // Reserve on-chain localId up-front (required)
-      //const popup = preOpenAmvaultPopup()
-      let onchainLocalId: string | null = null
-      try {
-        const out = await reserveDraftOnchain(current.address, offchainRef, { timeoutMs: 120_000 })
-        onchainLocalId = out.localId
-      } finally {
-      }
-
-      const category = form.category as 'BUDGET' | 'VOTING_CONFIG' | 'SET_ADMIN' | 'SET_VOTE_TOKEN' | 'EMERGENCY_CANCEL';
-
-      // Save to Firebase
-      await createProposal(current.id, {
-        title: form.title.trim(),
-        summary: form.summary.trim(),
-        category,
-        tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
-        bodyMd: previewMd,
-
-        // Category-specific fields (only include if present)
-        ...(category === 'BUDGET' && isNonEmpty(form.budgetAmount) && form.budgetAsset && isNonEmpty(form.recipient) ? {
-          budget: {
-            amount: Number(form.budgetAmount),
-            asset: form.budgetAsset,
-            recipient: form.recipient.trim(),
-          },
-        } : {}),
-
-        ...(category === 'VOTING_CONFIG' ? {
-          ...(numOrUndef(form.votingDelayBlocks) != null ? { votingDelayBlocks: numOrUndef(form.votingDelayBlocks)! } : {}),
-          ...(numOrUndef(form.votingPeriodBlocks) != null ? { votingPeriodBlocks: numOrUndef(form.votingPeriodBlocks)! } : {}),
-          ...(numOrUndef(form.quorumBps) != null ? { quorumBps: numOrUndef(form.quorumBps)! } : {}),
-          ...(numOrUndef(form.treasuryTimelockSec) != null ? { treasuryTimelockSec: numOrUndef(form.treasuryTimelockSec)! } : {}),
-        } : {}),
-
-        ...(category === 'EMERGENCY_CANCEL' && isNonEmpty(form.cancelTargetId) ? {
-          cancelTargetId: Number(form.cancelTargetId),
-        } : {}),
+  }, [form, isBudget, isVotingCfg, isSetAdmin, isSetVoteToken, isBank])
 
 
-        ...(category === 'SET_ADMIN' && isNonEmpty(form.newAdmin) ? { newAdmin: form.newAdmin!.trim() } : {}),
-        ...(category === 'SET_VOTE_TOKEN' && isNonEmpty(form.newToken) ? { newToken: form.newToken!.trim() } : {}),
-
-        // On-chain linkage
-        daoAddress: current.address,
-        ...(offchainRef ? { offchainRef: offchainRef as `0x${string}` } : {}),
-        descriptionHash: null,
-        ...(onchainLocalId ? { reservedId: onchainLocalId } : {}),
-        onchainReserved: true,
-
-        // Extras
-        discussionUrl: form.discussionUrl || null,
-        references: form.references
-          ? form.references.split('\n').map(s => s.trim()).filter(Boolean)
-          : [],
-
-        // author / denorms
-        author: {
-          name: session.ain,
-          address: session.address,
-          avatar: Math.max(1, (parseInt((session.address || '0x0').slice(2, 10), 16) % 4) + 1),
-        },
-        daoName: current.name ?? null,
-      })
-
-      localStorage.removeItem(STORAGE_KEY)
-      nav('/proposals')
-    } catch (err: any) {
-      console.error('[proposal:create] failed:', err)
-      setError(err?.message || 'Submission failed.')
-    } finally {
-      setLoading(false)
-    }
-  } */
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -484,6 +494,42 @@ export default function NewProposal() {
           bodyMd: previewMd,
           discussionUrl: form.discussionUrl || null,
           references: refsArray,
+
+          ...(category === 'BANK'
+            ? {
+              bank: {
+                actionType: form.bankAction || null,
+                account: form.bankAction === 'CREATE'
+                  ? null
+                  : form.bankAccount?.trim() || null,
+                amount: form.bankAction === 'SPEND'
+                  ? (form.bankAmount ? Number(form.bankAmount) : null)
+                  : null,
+                asset: form.bankAction === 'SPEND'
+                  ? form.bankAsset || null
+                  : null,
+                recipient: form.bankAction === 'SPEND'
+                  ? form.bankRecipient?.trim() || null
+                  : null,
+                note:
+                  form.bankAction === 'CONFIG' || form.bankAction === 'CLOSE'
+                    ? form.bankNote?.trim() || null
+                    : null,
+                createAccounts:
+                  form.bankAction === 'CREATE'
+                    ? (form.bankNewAccounts || [])
+                      .filter(r => r.account.trim())
+                      .slice(0, MAX_BANK_NEW_ACCOUNTS)
+                      .map(r => ({
+                        account: r.account.trim(),
+                        asset: r.asset || null,
+                        note: r.note?.trim() || null,
+                      }))
+                    : null,
+              },
+            }
+            : { bank: null }),
+
 
           // Category-specific fields, same logic as create
           ...(category === 'BUDGET' && isNonEmpty(form.budgetAmount) && form.budgetAsset && isNonEmpty(form.recipient)
@@ -549,6 +595,39 @@ export default function NewProposal() {
           recipient: form.recipient?.trim(),
         }
       }
+      if (isBank) {
+        const bankPayload: any = {
+          actionType: form.bankAction,
+        }
+
+        if (form.bankAction === 'SPEND') {
+          bankPayload.account = form.bankAccount?.trim() || null
+          bankPayload.amount = form.bankAmount ? Number(form.bankAmount) : null
+          bankPayload.asset = form.bankAsset || null
+          bankPayload.recipient = form.bankRecipient?.trim() || null
+          bankPayload.note = form.bankNote?.trim() || null
+        } else if (form.bankAction === 'CONFIG') {
+          bankPayload.account = form.bankAccount?.trim() || null
+          bankPayload.note = form.bankNote?.trim() || null
+        } else if (form.bankAction === 'CLOSE') {
+          bankPayload.account = form.bankAccount?.trim() || null
+          bankPayload.note = form.bankNote?.trim() || null
+        } else if (form.bankAction === 'CREATE') {
+          const rows = (form.bankNewAccounts || [])
+            .filter(r => r.account.trim())
+            .slice(0, MAX_BANK_NEW_ACCOUNTS)
+
+          bankPayload.createAccounts = rows.map(r => ({
+            account: r.account.trim(),
+            asset: r.asset || null,
+            note: r.note?.trim() || null,
+          }))
+        }
+
+        metaForRef.bank = bankPayload
+      }
+
+
       if (isVotingCfg) {
         metaForRef.votingDelayBlocks = Number(form.votingDelayBlocks)
         metaForRef.votingPeriodBlocks = Number(form.votingPeriodBlocks)
@@ -587,6 +666,30 @@ export default function NewProposal() {
             },
           }
           : {}),
+        ...(category === 'BANK'
+          ? {
+            bank: {
+              actionType: form.bankAction || null,
+              account: form.bankAccount?.trim() || null,
+              amount: form.bankAmount ? Number(form.bankAmount) : null,
+              asset: form.bankAsset || null,
+              recipient: form.bankRecipient?.trim() || null,
+              note: form.bankNote?.trim() || null,
+              createAccounts:
+                form.bankAction === 'CREATE'
+                  ? (form.bankNewAccounts || [])
+                    .filter(r => r.account.trim())
+                    .slice(0, MAX_BANK_NEW_ACCOUNTS)
+                    .map(r => ({
+                      account: r.account.trim(),
+                      asset: r.asset || null,
+                      note: r.note?.trim() || null,
+                    }))
+                  : null,
+            },
+          }
+          : {}),
+
 
         ...(category === 'VOTING_CONFIG'
           ? {
@@ -808,6 +911,211 @@ export default function NewProposal() {
             </div>
           </div>
         )}
+        {/* BANK */}
+        {isBank && (
+          <div className="space-y-4 border rounded-xl p-4 bg-slate-50/60">
+            <div className="text-sm text-slate-700">
+              These actions operate on the DAO&apos;s <strong>Bank contract</strong>,
+              not directly on the timelock treasury.
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <div className="label">Bank Action</div>
+                <select
+                  className="select"
+                  value={form.bankAction || ''}
+                  onChange={e =>
+                    setForm(f => ({
+                      ...f,
+                      bankAction: (e.target.value || undefined) as BankAction,
+                    }))
+                  }
+                >
+                  <option value="">Select…</option>
+                  {BANK_ACTIONS.map(a => (
+                    <option key={a.value} value={a.value}>{a.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Account input for non-CREATE actions */}
+              {form.bankAction && form.bankAction !== 'CREATE' && (
+                <div>
+                  <div className="label">Bank Account ID</div>
+                  <input
+                    className="input"
+                    placeholder="e.g., 1, 2, grants-1"
+                    value={form.bankAccount}
+                    onChange={e => setForm(f => ({ ...f, bankAccount: e.target.value }))}
+                  />
+                </div>
+              )}
+
+              {form.bankAction === 'SPEND' && (
+                <div>
+                  <div className="label">Recipient Address</div>
+                  <input
+                    className="input font-mono"
+                    placeholder="0x…"
+                    value={form.bankRecipient}
+                    onChange={e => setForm(f => ({ ...f, bankRecipient: e.target.value }))}
+                  />
+                </div>
+              )}
+            </div>
+
+            {form.bankAction === 'SPEND' && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <div className="label">Amount</div>
+                  <input
+                    className="input"
+                    placeholder="e.g., 2500"
+                    value={form.bankAmount}
+                    onChange={e => setForm(f => ({ ...f, bankAmount: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <div className="label">Asset</div>
+                  <select
+                    className="select"
+                    value={form.bankAsset}
+                    onChange={e => setForm(f => ({ ...f, bankAsset: e.target.value }))}
+                  >
+                    {ASSETS.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+                <div className="text-xs text-slate self-end">
+                  This will propose a transfer from the selected bank account to the recipient.
+                </div>
+              </div>
+            )}
+
+            {form.bankAction === 'CONFIG' && (
+              <div>
+                <div className="label">Account Change Summary</div>
+                <textarea
+                  className="textarea"
+                  placeholder="Describe the limit / routing / account configuration change."
+                  rows={3}
+                  value={form.bankNote}
+                  onChange={e => setForm(f => ({ ...f, bankNote: e.target.value }))}
+                />
+              </div>
+            )}
+
+            {form.bankAction === 'CLOSE' && (
+              <div className="text-xs text-red-700">
+                This will propose closing the selected bank account.
+                Ensure balances are settled before closing.
+              </div>
+            )}
+
+            {form.bankAction === 'CREATE' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="label">New Accounts (up to {MAX_BANK_NEW_ACCOUNTS})</div>
+                  <button
+                    type="button"
+                    className="btn px-3 py-1 text-xs"
+                    disabled={form.bankNewAccounts.length >= MAX_BANK_NEW_ACCOUNTS}
+                    onClick={() =>
+                      setForm(f => {
+                        if (f.bankNewAccounts.length >= MAX_BANK_NEW_ACCOUNTS) return f
+                        return {
+                          ...f,
+                          bankNewAccounts: [
+                            ...f.bankNewAccounts,
+                            { account: '', asset: ASSETS[0], note: '' },
+                          ],
+                        }
+                      })
+                    }
+                  >
+                    + Add account
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {form.bankNewAccounts.map((row, idx) => (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-1 md:grid-cols-3 gap-3 border rounded-lg p-3 bg-white/70"
+                    >
+                      <div>
+                        <div className="label">Account ID / Name #{idx + 1}</div>
+                        <input
+                          className="input"
+                          placeholder="e.g., grants-1"
+                          value={row.account}
+                          onChange={e =>
+                            setForm(f => {
+                              const next = [...f.bankNewAccounts]
+                              next[idx] = { ...next[idx], account: e.target.value }
+                              return { ...f, bankNewAccounts: next }
+                            })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <div className="label">Asset</div>
+                        <select
+                          className="select"
+                          value={row.asset}
+                          onChange={e =>
+                            setForm(f => {
+                              const next = [...f.bankNewAccounts]
+                              next[idx] = { ...next[idx], asset: e.target.value }
+                              return { ...f, bankNewAccounts: next }
+                            })
+                          }
+                        >
+                          {ASSETS.map(a => <option key={a} value={a}>{a}</option>)}
+                        </select>
+                      </div>
+                      <div className="md:col-span-3">
+                        <div className="label flex items-center justify-between">
+                          <span>Note / Purpose</span>
+                          {form.bankNewAccounts.length > 1 && (
+                            <button
+                              type="button"
+                              className="text-xs text-red-600"
+                              onClick={() =>
+                                setForm(f => ({
+                                  ...f,
+                                  bankNewAccounts: f.bankNewAccounts.filter((_, i) => i !== idx),
+                                }))
+                              }
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        <textarea
+                          className="textarea"
+                          rows={2}
+                          placeholder="Describe how this account will be used."
+                          value={row.note}
+                          onChange={e =>
+                            setForm(f => {
+                              const next = [...f.bankNewAccounts]
+                              next[idx] = { ...next[idx], note: e.target.value }
+                              return { ...f, bankNewAccounts: next }
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+
+
 
 
 

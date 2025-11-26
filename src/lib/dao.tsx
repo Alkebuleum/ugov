@@ -43,6 +43,11 @@ function friendlyFirestoreError(e: any): string {
     return e?.message || 'Unknown Firestore error'
 }
 
+// Which AIN is allowed to manage multiple DAOs
+const DAO_ADMIN_AIN = String(import.meta.env.VITE_UGOV_DAO_ADMIN_AIN || '')
+    .trim()
+    .toLowerCase()
+
 /* -------------------- types & context -------------------- */
 
 
@@ -107,7 +112,13 @@ export function DAOProvider({ children }: { children: React.ReactNode }) {
     const userAmid = session?.ain ? String(session.ain) : null
     const userWallet = session?.address || undefined
     const [userPrefDaoId, setUserPrefDaoId] = useState<string | null>(null) // NEW
-    const userUnsubRef = useRef<null | (() => void)>(null)                 // NEW
+    const userUnsubRef = useRef<null | (() => void)>(null)
+
+    // 🔐 Is this user the DAO super-admin?
+    const isDaoAdmin =
+        !!session?.ain &&
+        !!DAO_ADMIN_AIN &&
+        session.ain.trim().toLowerCase() === DAO_ADMIN_AIN// NEW
 
     // Live list of DAOs with watchdog timeout
     useEffect(() => {
@@ -132,17 +143,30 @@ export function DAOProvider({ children }: { children: React.ReactNode }) {
                 clearTimeout(timeout)
                 const raw = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as DAO[]
 
-                // Validate docs to avoid crashes on malformed data
                 const rows = raw.filter((r) => {
                     const ok = typeof r.address === 'string' && r.address.length > 0
                     if (!ok) dlog('DAO skipped malformed doc (missing address)', r)
                     return ok
                 })
 
-                dlog('DAO snapshot OK', { count: rows.length, ids: rows.map(r => r.id) })
-                setDaos(rows)
+                // 🔐 Visibility filter:
+                // - Admin AIN: sees ALL DAOs
+                // - Everyone else: only default DAO(s), or first DAO as fallback
+                let visible = rows
+                if (!isDaoAdmin) {
+                    const defaults = rows.filter(d => d.isDefault)
+                    visible = defaults.length ? defaults : rows.slice(0, 1)
+                }
+
+                dlog('DAO snapshot OK', {
+                    count: visible.length,
+                    ids: visible.map(r => r.id),
+                    isDaoAdmin,
+                })
+                setDaos(visible)
                 setLoading(false)
             },
+
             (e) => {
                 clearTimeout(timeout)
                 console.error('[uGov] Firestore onSnapshot error', e)
@@ -155,7 +179,7 @@ export function DAOProvider({ children }: { children: React.ReactNode }) {
             dlog('DAO snapshot unsubscribed')
             unsub()
         }
-    }, [])
+    }, [isDaoAdmin])
 
     // Listen to user prefs (AIN) and keep userPrefDaoId fresh                  // NEW
     useEffect(() => {
@@ -226,6 +250,12 @@ export function DAOProvider({ children }: { children: React.ReactNode }) {
 
 
     const createDAO = async (data: Omit<DAO, 'id' | 'createdAt'>) => {
+        if (!isDaoAdmin) {
+            const err = new Error('Only the DAO admin can create new DAOs.')
+            console.warn('[uGov] createDAO blocked for non-admin AIN', { ain: session?.ain })
+            setError(err.message)
+            throw err
+        }
         try {
             const makeDefault = daos.length === 0 || data.isDefault === true
 

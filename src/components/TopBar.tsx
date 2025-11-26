@@ -8,7 +8,8 @@ import { setUserPrefsByAmid } from '../lib/firebase'
 import Identicon from './Identicon'
 import logo from '../assets/logotext.svg'
 import type { DAO as DAOType } from '../lib/dao'
-import { FLAGS } from '../lib/flags'
+import { FLAGS, isDaoAdmin } from '../lib/flags'
+
 
 //type TopBarProps = { onMenu?: () => void }
 type TopBarProps = { onMenu?: () => void; menuOpen?: boolean }
@@ -36,7 +37,6 @@ function seedFromString(s?: string): 1 | 2 | 3 | 4 {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
   return ((h % 4) + 1) as 1 | 2 | 3 | 4
 }
-
 
 
 export default function TopBar({ onMenu, menuOpen = false }: TopBarProps) {
@@ -87,6 +87,8 @@ export default function TopBar({ onMenu, menuOpen = false }: TopBarProps) {
   }, [])
 
   const ain = session?.ain
+
+  const canCreateDAO = FLAGS.canCreateDAO || isDaoAdmin(ain)
 
   // AIN popover state
   const [ainOpen, setAinOpen] = useState(false)
@@ -173,22 +175,30 @@ export default function TopBar({ onMenu, menuOpen = false }: TopBarProps) {
                   current={current ?? undefined}
                   onSelect={handleSelectDao}
                   onCreate={() => {
-                    if (FLAGS.canCreateDAO) nav('/daos/new')
-                    else alert('DAO creation is disabled in version 1')
+                    if (!canCreateDAO) {
+                      alert('Only DAO admins can create new DAOs in this version.')
+                      return
+                    }
+                    nav('/daos/new')
                   }}
                 />
+
               ) : !loading ? (
                 <button
                   className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-brand-line hover:bg-brand-line/30 text-sm"
                   onClick={() => {
-                    if (FLAGS.canCreateDAO) nav('/daos/new')
-                    else alert('DAO creation is disabled in version 1')
+                    if (!canCreateDAO) {
+                      alert('Only DAO admins can create new DAOs in this version.')
+                      return
+                    }
+                    nav('/daos/new')
                   }}
-                  disabled={!FLAGS.canCreateDAO}
-                  title={FLAGS.canCreateDAO ? 'Create your first DAO' : 'Disabled in version 1'}
+                  disabled={!canCreateDAO}
+                  title={canCreateDAO ? 'Create your first DAO' : 'Only DAO admins can create DAOs'}
                 >
                   <Plus size={16} /> <span className="hidden md:inline">Create DAO</span>
                 </button>
+
               ) : null}
             </div>
 
@@ -303,23 +313,31 @@ export default function TopBar({ onMenu, menuOpen = false }: TopBarProps) {
               current={current ?? undefined}
               onSelect={handleSelectDao}
               onCreate={() => {
-                if (FLAGS.canCreateDAO) nav('/daos/new')
-                else alert('DAO creation is disabled in version 1')
+                if (!canCreateDAO) {
+                  alert('Only DAO admins can create new DAOs in this version.')
+                  return
+                }
+                nav('/daos/new')
               }}
               fullWidth
             />
+
           ) : !loading ? (
             <button
               className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-brand-line hover:bg-brand-line/30 text-sm"
               onClick={() => {
-                if (FLAGS.canCreateDAO) nav('/daos/new')
-                else alert('DAO creation is disabled in version 1')
+                if (!canCreateDAO) {
+                  alert('Only DAO admins can create new DAOs in this version.')
+                  return
+                }
+                nav('/daos/new')
               }}
-              disabled={!FLAGS.canCreateDAO}
-              title={FLAGS.canCreateDAO ? 'Create your first DAO' : 'Disabled in version 1'}
+              disabled={!canCreateDAO}
+              title={canCreateDAO ? 'Create your first DAO' : 'Only DAO admins can create DAOs'}
             >
               <Plus size={16} /> Create DAO
             </button>
+
           ) : null}
         </div>
 

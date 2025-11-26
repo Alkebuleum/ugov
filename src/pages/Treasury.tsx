@@ -16,17 +16,21 @@ const ERC20_ABI = [
   'function symbol() view returns (string)',
 ]
 
-
-
-
 function shortAddr(a?: string, lead = 6, tail = 6) {
   if (!a) return ''
   return a.slice(0, lead) + '…' + a.slice(-tail)
 }
 function fmtUsd(n?: number) {
   if (n === undefined || n === null || Number.isNaN(n)) return '—'
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n) }
-  catch { return `$${n.toFixed(2)}` }
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 2,
+    }).format(n)
+  } catch {
+    return `$${n.toFixed(2)}`
+  }
 }
 function safeNum(v: unknown): number {
   const n = typeof v === 'string' ? parseFloat(v) : (typeof v === 'number' ? v : NaN)
@@ -75,8 +79,6 @@ export default function Treasury() {
     session?.ain &&
     adminAIN.toLowerCase() === session.ain.toLowerCase()
 
-
-
   // Live DAO doc => instant UI refresh after writes
   const [daoLive, setDaoLive] = useState<any | null>(null)
   useEffect(() => {
@@ -89,9 +91,12 @@ export default function Treasury() {
   }, [current?.id])
 
   const treasury = daoLive?.treasury ?? current?.treasury
+  const bank = daoLive?.bank ?? (current as any)?.bank           // 👈 NEW: bank field
+  const holder = bank || treasury                                // 👈 NEW: where funds are actually held
+
   const tokensConf = (daoLive?.trackedTokens ?? current?.trackedTokens ?? []) as any[]
 
-  // Make tokens list stable for effect deps (avoids re-running on identical content w/ new refs)
+  // Make tokens list stable for effect deps
   const tokensKey = useMemo(() => {
     try {
       const list = tokensConf as any[]
@@ -124,14 +129,14 @@ export default function Treasury() {
   const [resolving, setResolving] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0) // manual refresh trigger
 
-  // DAO-switch: hard reset transient UI to prevent "frozen" feel
+  // DAO-switch: hard reset transient UI
   useEffect(() => {
     setResolved([])
     setEditingIndex(null)
     setActionError(null)
     setConfirmDeleteIdx(null)
     setResolving(false)
-    setRefreshKey(k => k + 1) // kick a fresh read
+    setRefreshKey(k => k + 1)
   }, [daoId])
 
   // Timeout helper for RPC safety
@@ -149,8 +154,8 @@ export default function Treasury() {
       setProviderMissing(!provider)
       setResolving(true)
       try {
-        // Strict guard: require a valid treasury before any RPC call
-        if (!treasury || !provider || !isEthAddr(String(treasury))) {
+        // Require a valid holder (bank or treasury)
+        if (!holder || !provider || !isEthAddr(String(holder))) {
           setResolved([])
           return
         }
@@ -167,14 +172,14 @@ export default function Treasury() {
 
             try {
               if (type === 'native') {
-                const bal = await withTimeout(provider.getBalance(treasury))
+                const bal = await withTimeout(provider.getBalance(holder))
                 const human = Number(ethers.formatUnits(bal, decimalsConf))
                 results.push({ type, address: '', symbol: symbolConf || 'AKE', decimals: decimalsConf, balance: human, priceUsd })
               } else {
                 if (!isEthAddr(t.address || '')) throw new Error('Bad token address')
                 const erc20 = new ethers.Contract(t.address, ERC20_ABI, provider)
                 const [rawBal, decMaybe, symMaybe] = await Promise.all([
-                  withTimeout(erc20.balanceOf(treasury)),
+                  withTimeout(erc20.balanceOf(holder)),
                   t.decimals ? Promise.resolve(t.decimals) : withTimeout(erc20.decimals()).catch(() => decimalsConf),
                   t.symbol ? Promise.resolve(t.symbol) : withTimeout(erc20.symbol()).catch(() => symbolConf),
                 ])
@@ -204,8 +209,7 @@ export default function Treasury() {
 
     run()
     return () => { cancelled = true }
-    // Depend on stable tokensKey, not the raw array; include daoId and refreshKey
-  }, [treasury, tokensKey, provider, refreshKey, daoId])
+  }, [holder, tokensKey, provider, refreshKey, daoId])   // 👈 depend on holder now
 
   const totals = useMemo(() => {
     const totalUsd = resolved.reduce((sum, r) => {
@@ -261,7 +265,7 @@ export default function Treasury() {
     if (!form.isNative && !isEthAddr(form.address.trim())) return 'Please provide a valid 0x token address.'
     if (!form.symbol.trim()) return 'Symbol is required.'
     if (!/^\d+$/.test(form.decimals.trim())) return 'Decimals must be a whole number.'
-    if (!treasury || !isEthAddr(String(treasury))) return 'DAO treasury address is not set.'
+    if (!holder || !isEthAddr(String(holder))) return 'DAO bank/treasury address is not set.'
     return null
   }
 
@@ -290,8 +294,8 @@ export default function Treasury() {
 
       setUpdating(true)
       await updateDAOTrackedTokens(current.id, next as any)
-      setEditingIndex(null)             // UI updates via onSnapshot
-      setRefreshKey((k) => k + 1)       // also refetch balances now
+      setEditingIndex(null)
+      setRefreshKey((k) => k + 1)
     } catch (e: any) {
       setActionError(e?.message || 'Failed to save token.')
     } finally {
@@ -320,51 +324,89 @@ export default function Treasury() {
     )
   }
 
-  const invalidTreasury = !!treasury && !isEthAddr(String(treasury))
+  const invalidHolder = !!holder && !isEthAddr(String(holder))
 
   return (
     <div className="space-y-6">
-      {(!provider || providerMissing || invalidTreasury) && (
+      {(!provider || providerMissing || invalidHolder || !holder) && (
         <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-sm flex items-center gap-2">
           <AlertTriangle size={16} />
           {(!provider || providerMissing)
             ? <>Unable to create a read-only RPC provider from <code>CHAIN.rpcUrl</code>. Check your RPC endpoint.</>
-            : invalidTreasury
-              ? <>Treasury address looks invalid for this DAO: <code className="font-mono">{String(treasury)}</code></>
-              : <>DAO treasury address is not set.</>
+            : !holder
+              ? <>DAO bank/treasury address is not set.</>
+              : invalidHolder
+                ? <>Funds holder looks invalid: <code className="font-mono">{String(holder)}</code></>
+                : null
           }
         </div>
       )}
 
-      {/* DEBUG OUTPUT */}
-      {/*  <div className="text-sm text-slate">
-        <div>Status: <code>{ainStatus}</code></div>
-        <div>Admin address: <code>{current?.admin || '(none)'}</code></div>
-        <div>Admin AIN from chain: <code>{adminAin || '(null)'}</code></div>
-        <div>Session AIN: <code>{session?.ain || '(null)'}</code></div>
-        <div>isAdmin: <code>{String(isAdmin)}</code></div>
-      </div> */}
-
       {/* Header */}
       <div className="card p-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Treasury</h1>
-          <button className="btn" onClick={() => setRefreshKey(k => k + 1)} disabled={resolving}>
-            <RotateCw size={16} className="mr-2" /> {resolving ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
-        <div className="mt-2 text-slate break-words">
-          Treasury address:&nbsp;
-          <span className="font-mono break-all">{treasury ? treasury : '—'}</span>
-        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold">Treasury</h1>
+            <div className="mt-2 text-slate break-words">
+              Treasury (timelock):{' '}
+              <span className="font-mono break-all">{treasury ? treasury : '—'}</span>
+            </div>
+            <div className="mt-1 text-slate break-words">
+              Bank (accounts):{' '}
+              <span className="font-mono break-all">{bank ? bank : '—'}</span>
+            </div>
+            {isAdmin && !bank && (
+              <div className="mt-2 text-xs text-slate flex items-center gap-2">
+                <AlertTriangle size={13} />
+                <span>
+                  No bank created yet. In v2, you&apos;ll be able to deploy a DAO Bank directly from here.
+                </span>
+              </div>
+            )}
+            {isAdmin && bank && (
+              <div className="mt-2 inline-flex items-center text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                <Check size={12} className="mr-1" /> Bank active (balances below use the bank contract)
+              </div>
+            )}
+          </div>
 
+          <div className="flex items-center gap-2">
+            {isAdmin && !bank && (
+              <button
+                className="btn opacity-60 cursor-not-allowed"
+                disabled
+                title="Coming in v2 – you already created the bank manually."
+              >
+                <Banknote size={16} className="mr-2" /> Create DAO Bank
+              </button>
+            )}
+            <button className="btn" onClick={() => setRefreshKey(k => k + 1)} disabled={resolving}>
+              <RotateCw size={16} className="mr-2" /> {resolving ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <StatCard icon={<Banknote size={18} />} label="Total Value (USD)" value={fmtUsd(totals.totalUsd)} sub={resolved.length ? 'Across tracked tokens' : 'No tokens tracked'} />
-        <StatCard icon={<Coins size={18} />} label="Tracked Tokens" value={`${resolved.length} / 3`} sub="Max 3" />
-        <StatCard icon={<Wallet2 size={18} />} label="Treasury Address" value={treasury ? shortAddr(treasury) : '—'} sub="On-chain" />
+        <StatCard
+          icon={<Banknote size={18} />}
+          label="Total Value (USD)"
+          value={fmtUsd(totals.totalUsd)}
+          sub={resolved.length ? 'Across tracked tokens' : 'No tokens tracked'}
+        />
+        <StatCard
+          icon={<Coins size={18} />}
+          label="Tracked Tokens"
+          value={`${resolved.length} / 3`}
+          sub="Max 3"
+        />
+        <StatCard
+          icon={<Wallet2 size={18} />}
+          label={bank ? 'Bank Address' : 'Treasury Address'}          // 👈 dynamic label
+          value={holder ? shortAddr(holder) : '—'}
+          sub={bank ? 'Bank contract (community funds)' : 'Timelock treasury'}
+        />
       </div>
 
       {actionError && (
@@ -374,7 +416,12 @@ export default function Treasury() {
       )}
 
       {/* Manage tokens */}
-      <motion.section className="card p-5" initial={{ opacity: 0, y: 10 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
+      <motion.section
+        className="card p-5"
+        initial={{ opacity: 0, y: 10 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+      >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <h2 className="text-xl font-semibold">Tracked assets</h2>
           {isAdmin && (
@@ -394,10 +441,13 @@ export default function Treasury() {
           )}
         </div>
 
+        {!canAddMore && (
+          <div className="mt-3 text-xs text-slate">
+            Limit reached (3). Edit or remove a token to add another.
+          </div>
+        )}
 
-        {!canAddMore && <div className="mt-3 text-xs text-slate">Limit reached (3). Edit or remove a token to add another.</div>}
-
-        {/* Inline editor (no Balance field; chain-read) */}
+        {/* Inline editor */}
         {isAdmin && editingIndex !== null && (
           <div className="mt-4 border rounded-xl p-4 bg-brand-bg">
             <div className="grid md:grid-cols-6 gap-3">
@@ -407,7 +457,9 @@ export default function Treasury() {
                   type="checkbox"
                   className="w-4 h-4"
                   checked={form.isNative}
-                  onChange={(e) => setForm(f => ({ ...f, isNative: e.target.checked, address: e.target.checked ? '' : f.address }))}
+                  onChange={(e) =>
+                    setForm(f => ({ ...f, isNative: e.target.checked, address: e.target.checked ? '' : f.address }))
+                  }
                 />
                 <label htmlFor="isNative" className="text-sm">Native token (AKE)</label>
               </div>
@@ -415,23 +467,43 @@ export default function Treasury() {
               {!form.isNative && (
                 <div className="md:col-span-3">
                   <div className="label">Token address</div>
-                  <input className="input font-mono" placeholder="0x…" value={form.address} onChange={(e) => setForm(f => ({ ...f, address: e.target.value }))} />
+                  <input
+                    className="input font-mono"
+                    placeholder="0x…"
+                    value={form.address}
+                    onChange={(e) => setForm(f => ({ ...f, address: e.target.value }))}
+                  />
                 </div>
               )}
 
               <div>
                 <div className="label">Symbol</div>
-                <input className="input" placeholder={form.isNative ? 'AKE' : 'USDC'} value={form.symbol} onChange={(e) => setForm(f => ({ ...f, symbol: e.target.value }))} />
+                <input
+                  className="input"
+                  placeholder={form.isNative ? 'AKE' : 'USDC'}
+                  value={form.symbol}
+                  onChange={(e) => setForm(f => ({ ...f, symbol: e.target.value }))}
+                />
               </div>
 
               <div>
                 <div className="label">Decimals</div>
-                <input className="input" placeholder="18" value={form.decimals} onChange={(e) => setForm(f => ({ ...f, decimals: e.target.value }))} />
+                <input
+                  className="input"
+                  placeholder="18"
+                  value={form.decimals}
+                  onChange={(e) => setForm(f => ({ ...f, decimals: e.target.value }))}
+                />
               </div>
 
               <div>
                 <div className="label">Price (USD)</div>
-                <input className="input" placeholder="optional" value={form.priceUsd} onChange={(e) => setForm(f => ({ ...f, priceUsd: e.target.value }))} />
+                <input
+                  className="input"
+                  placeholder="optional"
+                  value={form.priceUsd}
+                  onChange={(e) => setForm(f => ({ ...f, priceUsd: e.target.value }))}
+                />
               </div>
             </div>
 
@@ -474,10 +546,18 @@ export default function Treasury() {
                     <tr key={`${r.symbol}-${r.address || 'native'}-${i}`} className="border-b border-brand-line/70">
                       <td className="py-3 pr-3">{r.type === 'native' ? 'Native' : 'ERC-20'}</td>
                       <td className="py-3 pr-3 font-medium">{r.symbol}</td>
-                      <td className="py-3 pr-3 font-mono">{r.type === 'native' ? '—' : (r.address ? shortAddr(r.address) : '—')}</td>
-                      <td className="py-3 pr-3 text-right">{resolving ? '…' : Number.isFinite(r.balance) ? r.balance.toLocaleString() : '—'}</td>
-                      <td className="py-3 pr-3 text-right">{r.priceUsd != null && !Number.isNaN(r.priceUsd) ? fmtUsd(r.priceUsd) : '—'}</td>
-                      <td className="py-3 pr-3 text-right">{resolving ? '…' : Number.isFinite(valueUsd) ? fmtUsd(valueUsd) : '—'}</td>
+                      <td className="py-3 pr-3 font-mono">
+                        {r.type === 'native' ? '—' : (r.address ? shortAddr(r.address) : '—')}
+                      </td>
+                      <td className="py-3 pr-3 text-right">
+                        {resolving ? '…' : Number.isFinite(r.balance) ? r.balance.toLocaleString() : '—'}
+                      </td>
+                      <td className="py-3 pr-3 text-right">
+                        {r.priceUsd != null && !Number.isNaN(r.priceUsd) ? fmtUsd(r.priceUsd) : '—'}
+                      </td>
+                      <td className="py-3 pr-3 text-right">
+                        {resolving ? '…' : Number.isFinite(valueUsd) ? fmtUsd(valueUsd) : '—'}
+                      </td>
                       <td className="py-3 pr-3 text-right">
                         {isAdmin && (
                           <div className="inline-flex items-center gap-2">
@@ -485,16 +565,25 @@ export default function Treasury() {
                               <Pencil size={14} className="mr-1" /> Edit
                             </button>
                             {confirmDeleteIdx === i ? (
-                              <button className="btn bg-red-600 text-white" onClick={() => onRemove(i)} disabled={updating}>Confirm</button>
+                              <button
+                                className="btn bg-red-600 text-white"
+                                onClick={() => onRemove(i)}
+                                disabled={updating}
+                              >
+                                Confirm
+                              </button>
                             ) : (
-                              <button className="btn" onClick={() => setConfirmDeleteIdx(i)} disabled={updating}>
+                              <button
+                                className="btn"
+                                onClick={() => setConfirmDeleteIdx(i)}
+                                disabled={updating}
+                              >
                                 <Trash2 size={14} className="mr-1" /> Remove
                               </button>
                             )}
                           </div>
                         )}
                       </td>
-
                     </tr>
                   )
                 })}
@@ -517,7 +606,11 @@ export default function Treasury() {
 /* --- helpers --- */
 function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
   return (
-    <motion.div className="card p-4" whileHover={{ y: -2, boxShadow: '0 16px 40px rgba(15,23,42,0.12)' }} transition={{ type: 'spring', stiffness: 300, damping: 20 }}>
+    <motion.div
+      className="card p-4"
+      whileHover={{ y: -2, boxShadow: '0 16px 40px rgba(15,23,42,0.12)' }}
+      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+    >
       <div className="text-slate text-xs flex items-center gap-2">{icon} {label}</div>
       <div className="text-2xl font-bold mt-1">{value}</div>
       {!!sub && <div className="mt-2 text-xs text-slate">{sub}</div>}

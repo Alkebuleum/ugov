@@ -10,3 +10,16 @@ export const FLAGS = {
     version: v,
     canCreateDAO: envAllowsCreate ?? versionAllowsCreate,
 }
+
+
+// Admin AINs allowed to bypass create-DAO flag
+const adminEnv = String(import.meta.env.VITE_UGOV_DAO_ADMIN_AIN ?? '').trim()
+
+export const DAO_ADMINS: string[] = adminEnv
+    ? adminEnv.split(',').map((s) => s.trim()).filter(Boolean)
+    : []
+
+export function isDaoAdmin(ain?: string | null): boolean {
+    if (!ain) return false
+    return DAO_ADMINS.includes(ain)
+}

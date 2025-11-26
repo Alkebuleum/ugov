@@ -1,12 +1,13 @@
 // src/pages/NewDAO.tsx
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createDAO } from '../lib/firebase'
+//import { createDAO } from '../lib/firebase'
 import { useDAO } from '../lib/dao'
 import { CHAIN } from '../lib/chain'
 import { useAuth } from 'amvault-connect'
 import { deployDAO_viaFactory } from '../lib/daoDeploy'
 import { parseEther } from 'ethers'
+
 
 type Form = {
     address: string      // DAO (manual path only)
@@ -28,6 +29,12 @@ type Form = {
 const FACTORY_ADDR = String(import.meta.env.VITE_AMID_DAO_FACTORY || '').trim()
 const DAO_IMPL_DEFAULT = String(import.meta.env.VITE_AMID_DAO_IMPL || '').trim()
 const TREAS_IMPL_DEFAULT = String(import.meta.env.VITE_AMID_TREAS_IMPL || '').trim()
+
+// AIN that is allowed to create/manage DAOs
+const DAO_ADMIN_AIN = String(import.meta.env.VITE_UGOV_DAO_ADMIN_AIN || '')
+    .trim()
+    .toLowerCase()
+
 
 const initial: Form = {
     address: '',
@@ -52,13 +59,20 @@ function isHexAddress(v: string) {
 
 export default function NewDAO() {
     const nav = useNavigate()
-    const { setCurrent } = useDAO()
+    const { setCurrent, createDAO } = useDAO()
     const { session } = useAuth()
 
     const [f, setF] = useState<Form>(initial)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [stage, setStage] = useState<string>('')
+
+    const isDaoAdmin =
+        !!session?.ain &&
+        !!DAO_ADMIN_AIN &&
+        session.ain.trim().toLowerCase() === DAO_ADMIN_AIN
+
+
 
     const update =
         (k: keyof Form) =>
@@ -147,7 +161,8 @@ export default function NewDAO() {
             }
 
             // Save to Firebase
-            const { id } = await createDAO({
+            // Save to Firebase
+            const id = await createDAO({
                 address: daoAddr,
                 name: f.name.trim(),
                 about: f.about.trim(),
@@ -162,6 +177,7 @@ export default function NewDAO() {
                 treasury: treasAddr,
                 chainId: CHAIN.id,
             } as any)
+
 
             // Cache locally and navigate
             setCurrent({
@@ -188,6 +204,23 @@ export default function NewDAO() {
         }
     }
 
+    if (!isDaoAdmin) {
+        return (
+            <div className="card p-6 max-w-xl">
+                <h1 className="text-xl font-semibold mb-2">DAO creation restricted</h1>
+                <p className="text-slate mb-4">
+                    Only the designated Alkebuleum DAO admin can register new DAOs this is version.
+                </p>
+                <button
+                    className="btn"
+                    type="button"
+                    onClick={() => nav(-1)}
+                >
+                    Go back
+                </button>
+            </div>
+        )
+    }
     return (
         <div className="space-y-4">
             <h1 className="text-2xl font-semibold">Create a new DAO</h1>

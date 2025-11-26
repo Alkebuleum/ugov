@@ -14,7 +14,6 @@ import {
 } from 'firebase/functions'
 import { getStorage, connectStorageEmulator } from 'firebase/storage'
 import { getReadProvider } from './chain'
-import { STATE } from './daoProposals'
 
 
 /* -------------------------------------------------------------------------- */
@@ -139,6 +138,7 @@ export type TreasuryCache = {
     valueUsd?: number
   }>
   updatedAt?: Timestamp
+  updatedAtMs?: number
 }
 
 
@@ -154,6 +154,7 @@ export type ProposalStatus =
   | 'executed'
   | 'failed'
   | 'canceled'
+  | 'defeated'
 
 export type ProposalPatch = {
   phase?: ProposalPhase
@@ -209,12 +210,12 @@ export async function markProposalSubmitted(
 
   const payload: Partial<ProposalDoc> & {
     phase: 'onchain'
-    status: 'Submitted' | string
+    status: 'submitted' | string
     txHash: `0x${string}`
     updatedAt: any
   } = {
     phase: 'onchain',
-    status: 'Submitted',
+    status: 'submitted',
     txHash: patch.txHash,
     // optional
     ...(patch.offchainRef !== undefined ? { offchainRef: patch.offchainRef } : {}),
@@ -299,10 +300,16 @@ export async function refreshTreasuryCache(daoId: string) {
   if (!snap.exists()) throw new Error('DAO not found')
 
   const d = snap.data() as any
+
   const treasury: string | undefined = d.treasury
+  const bank: string | undefined = d.bank
+
+  // Use bank if present; otherwise fall back to treasury timelock
+  const holder: string | undefined = bank || treasury
+
   const tokens: any[] = Array.isArray(d.trackedTokens) ? d.trackedTokens.slice(0, 3) : []
-  if (!treasury || !/^0x[a-fA-F0-9]{40}$/.test(treasury)) {
-    throw new Error('DAO treasury address not set or invalid.')
+  if (!holder || !/^0x[a-fA-F0-9]{40}$/.test(holder)) {
+    throw new Error('DAO treasury/bank address not set or invalid.')
   }
 
   const provider = getReadProvider()
@@ -316,8 +323,8 @@ export async function refreshTreasuryCache(daoId: string) {
 
     try {
       if (type === 'native') {
-        const bal = await provider.getBalance(treasury)         // bigint
-        const human = ethers.formatUnits(bal, decimals)         // string
+        const bal = await provider.getBalance(holder)              // 👈 use holder
+        const human = ethers.formatUnits(bal, decimals)
         const valueUsd = priceUsd != null ? Number(human) * priceUsd : null
         rows.push({
           type, address: '', symbol, decimals, balance: human,
@@ -328,7 +335,7 @@ export async function refreshTreasuryCache(daoId: string) {
         const addr = String(t?.address || '')
         if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) throw new Error('Bad token address')
         const erc20 = new ethers.Contract(addr, ERC20_ABI, provider)
-        const rawBal: bigint = await erc20.balanceOf(treasury)
+        const rawBal: bigint = await erc20.balanceOf(holder)       // 👈 use holder
         const human = ethers.formatUnits(rawBal, decimals)
         const valueUsd = priceUsd != null ? Number(human) * priceUsd : null
         rows.push({
@@ -347,20 +354,24 @@ export async function refreshTreasuryCache(daoId: string) {
     }
   }
 
-  const totalUsd = rows.reduce((sum, r: any) => sum + (Number.isFinite(r.valueUsd) ? Number(r.valueUsd) : 0), 0)
+  const totalUsd = rows.reduce(
+    (sum, r: any) => sum + (Number.isFinite(r.valueUsd) ? Number(r.valueUsd) : 0),
+    0
+  )
 
   const payload = sanitizeForFirestore({
     treasuryCache: {
       totalUsd,
       perToken: rows,
-      updatedAt: serverTimestamp(),  // 🔐 server-resolved
-      updatedAtMs: Date.now(),       // ⚡ instant fallback for UI
+      updatedAt: serverTimestamp(),
+      updatedAtMs: Date.now(),
     },
   })
 
   await updateDoc(ref, payload)
   return { totalUsd }
 }
+
 
 // Add this new type:
 export type TrackedToken = {
@@ -371,7 +382,7 @@ export type TrackedToken = {
   // If you store a string, we'll parse it in the UI.
   balance?: number | string
   priceUsd?: number | string
-  updatedAt?: Timestamp
+  updatedAt?: Timestamp | FieldValue
 }
 
 export async function updateDAOTrackedTokens(
@@ -415,6 +426,7 @@ export type DAO = {
   about?: string
   isDefault: boolean
   treasury: string
+  bank?: string
   admin: string
   votesToken: string
   votingDelayBlocks: number
@@ -426,7 +438,7 @@ export type DAO = {
 }
 
 // ---- Types (lightweight, align with what ProposalDetail expects) ----
-type CategoryCode = 'BUDGET' | 'VOTING_CONFIG' | 'SET_ADMIN' | 'SET_VOTE_TOKEN' | 'EMERGENCY_CANCEL'
+type CategoryCode = 'BUDGET' | 'VOTING_CONFIG' | 'SET_ADMIN' | 'SET_VOTE_TOKEN' | 'EMERGENCY_CANCEL' | 'BANK'
 
 export type Phase = 'discussion' | 'onchain'
 type Budget = {
@@ -457,6 +469,23 @@ export type NewProposal = {
   votingPeriodBlocks?: number | null
   quorumBps?: number | null
   treasuryTimelockSec?: number | null
+
+  // BANK
+  bank?: {
+    actionType?: 'SPEND' | 'CONFIG' | 'CREATE' | 'CLOSE' | null
+    account?: string | null
+    amount?: number | null
+    asset?: string | null
+    recipient?: string | null
+    note?: string | null
+    createAccounts?: Array<{
+      account: string
+      asset: string | null
+      note?: string | null
+    }> | null
+  } | null
+
+
 
   // Other action payloads
   budget?: Budget | null               // BUDGET
@@ -523,10 +552,34 @@ type ProposalDoc = {
   newAdmin?: string | null
   newToken?: string | null
 
+  // 🔹 NEW: Bank payload (stored as-is for UI + execution)
+  bank?: {
+    actionType?: 'SPEND' | 'CONFIG' | 'CREATE' | 'CLOSE' | null
+    account?: string | null
+    amount?: number | null
+    asset?: string | null
+    recipient?: string | null
+    note?: string | null
+    createAccounts?: {
+      account: string
+      asset: string | null
+      note?: string | null
+    }[] | null
+  } | null
+
   // Denorms
   author: Author
   phase: 'discussion' | 'onchain'
-  status: 'Draft' | 'Submitted' | 'Voting' | 'Queued' | 'Executed' | 'Failed' | 'Canceled'
+  status:
+  | 'draft'
+  | 'submitted'
+  | 'voting'
+  | 'queued'
+  | 'executed'
+  | 'failed'
+  | 'canceled'
+  | 'defeated'
+
   counters: { comments: number; votes: number }
   createdAt: any
 
@@ -563,10 +616,45 @@ type ProposalDoc = {
 export async function createProposal(daoId: string, p: NewProposal) {
   try {
     // sanitize helpers
-    const arr = (v?: string[]) => Array.isArray(v) ? v.filter(Boolean) : []
-    const num = (v: any) => (typeof v === 'number' ? v : v == null ? undefined : Number(v))
+    const arr = (v?: string[]) => (Array.isArray(v) ? v.filter(Boolean) : [])
+    const num = (v: any) =>
+      typeof v === 'number' ? v : v == null ? undefined : Number(v)
     const numOrNull = (v: any) => (v == null ? null : Number(v))
-    const strOrNull = (v: any) => (v == null || v === '' ? null : String(v))
+    const strOrNull = (v: any) =>
+      v == null || v === '' ? null : String(v)
+
+    // 🔹 Normalize bank block (incl. multi-create) if anything is set
+    const bankData =
+      p.bank &&
+        (
+          p.bank.actionType ||
+          p.bank.account ||
+          p.bank.amount != null ||
+          p.bank.asset ||
+          p.bank.recipient ||
+          p.bank.note ||
+          (p.bank.createAccounts && p.bank.createAccounts.length)
+        )
+        ? {
+          bank: {
+            actionType: p.bank.actionType ?? null,
+            account: p.bank.account ?? null,
+            amount: numOrNull(p.bank.amount),
+            asset: p.bank.asset ?? null,
+            recipient: p.bank.recipient ?? null,
+            note: strOrNull(p.bank.note),
+            createAccounts: Array.isArray(p.bank.createAccounts)
+              ? p.bank.createAccounts
+                .map((r) => ({
+                  account: String(r.account || '').trim(),
+                  asset: r.asset ?? null,
+                  note: r.note != null ? String(r.note) : null,
+                }))
+                .filter((r) => r.account) // drop empty rows
+              : null,
+          },
+        }
+        : { bank: null as ProposalDoc['bank'] }
 
     const docData: ProposalDoc = {
       daoId,
@@ -579,11 +667,21 @@ export async function createProposal(daoId: string, p: NewProposal) {
       references: arr(p.references),
 
       // Voting config knobs (persist only when defined)
-      ...(num(p.votingDelayBlocks) != null ? { votingDelayBlocks: num(p.votingDelayBlocks)! } : {}),
-      ...(num(p.votingPeriodBlocks) != null ? { votingPeriodBlocks: num(p.votingPeriodBlocks)! } : {}),
-      ...(num(p.quorumBps) != null ? { quorumBps: num(p.quorumBps)! } : {}),
-      ...(num(p.treasuryTimelockSec) != null ? { treasuryTimelockSec: num(p.treasuryTimelockSec)! } : {}),
+      ...(num(p.votingDelayBlocks) != null
+        ? { votingDelayBlocks: num(p.votingDelayBlocks)! }
+        : {}),
+      ...(num(p.votingPeriodBlocks) != null
+        ? { votingPeriodBlocks: num(p.votingPeriodBlocks)! }
+        : {}),
+      ...(num(p.quorumBps) != null
+        ? { quorumBps: num(p.quorumBps)! }
+        : {}),
+      ...(num(p.treasuryTimelockSec) != null
+        ? { treasuryTimelockSec: num(p.treasuryTimelockSec)! }
+        : {}),
 
+      // 🔹 Bank payload
+      ...bankData,
 
       // Action payloads
       budget: p.budget
@@ -591,16 +689,28 @@ export async function createProposal(daoId: string, p: NewProposal) {
           amount: Number(p.budget.amount),
           asset: p.budget.asset,
           recipient: p.budget.recipient,
-          ...(p.budget.decimals != null ? { decimals: Number(p.budget.decimals) } : {}),
+          ...(p.budget.decimals != null
+            ? { decimals: Number(p.budget.decimals) }
+            : {}),
         }
         : null,
-      ...(p.newAdmin !== undefined ? { newAdmin: strOrNull(p.newAdmin) } : {}),
-      ...(p.newToken !== undefined ? { newToken: strOrNull(p.newToken) } : {}),
+      ...(p.newAdmin !== undefined
+        ? { newAdmin: strOrNull(p.newAdmin) }
+        : {}),
+      ...(p.newToken !== undefined
+        ? { newToken: strOrNull(p.newToken) }
+        : {}),
 
       // Denorms
-      author: p.author ?? { name: 'AmID-xxxx', address: '0x...', avatar: Math.floor(Math.random() * 4) + 1 },
+      author:
+        p.author ??
+        {
+          name: 'AmID-xxxx',
+          address: '0x...',
+          avatar: Math.floor(Math.random() * 4) + 1,
+        },
       phase: 'discussion',
-      status: 'Draft',
+      status: 'draft', // 🔹 match ProposalDoc union: 'Draft' | 'Submitted' | ...
       counters: { comments: 0, votes: 0 },
       createdAt: serverTimestamp(),
 
@@ -614,7 +724,8 @@ export async function createProposal(daoId: string, p: NewProposal) {
       txHash: (p.txHash as any) ?? null,
       onchainReserved: !!p.onchainReserved,
 
-      cancelTargetId: p.cancelTargetId != null ? String(p.cancelTargetId) : null,
+      cancelTargetId:
+        p.cancelTargetId != null ? String(p.cancelTargetId) : null,
     }
 
     const ref = await addDoc(collection(db, 'proposals'), docData)
@@ -623,6 +734,7 @@ export async function createProposal(daoId: string, p: NewProposal) {
     throw new Error(err?.message || String(err))
   }
 }
+
 
 
 
@@ -697,48 +809,33 @@ export async function fetchDAOs() {
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as DAO[]
 }
 
+// 👇 NEW helper: what DAOs a given AIN can see
+const DAO_ADMIN_AIN = String(import.meta.env.VITE_UGOV_DAO_ADMIN_AIN || '')
+  .trim()
+  .toLowerCase()
+
+export async function fetchVisibleDAOsForAIN(ain?: string | null): Promise<DAO[]> {
+  const all = await fetchDAOs()
+
+  const isAdmin =
+    !!ain && !!DAO_ADMIN_AIN && ain.trim().toLowerCase() === DAO_ADMIN_AIN
+
+  // Admin AIN sees everything
+  if (isAdmin) return all
+
+  // Everyone else: only default DAO(s)
+  const defaults = all.filter(d => d.isDefault)
+
+  // Safety: if for some reason none is marked default, just show the first one
+  if (!defaults.length) return all.slice(0, 1)
+
+  return defaults
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Proposals (TOP-LEVEL)                                                     */
 /* -------------------------------------------------------------------------- */
 
-/* export async function createProposal(daoId: string, p: NewProposal) {
-  try {
-
-    const docData: ProposalDoc = {
-      daoId,
-      title: p.title,
-      summary: p.summary ?? '',
-      category: p.category ?? 'General',
-      tags: p.tags ?? [],
-      bodyMd: p.bodyMd,
-      discussionUrl: p.discussionUrl ?? null,
-      references: p.references ?? [],
-      budget: p.budget ?? null,
-      author: p.author ?? { name: 'AmID-xxxx', address: '0x...', avatar: Math.floor(Math.random() * 4) + 1 },
-      phase: 'discussion',
-      status: 'Draft',
-      counters: { comments: 0, votes: 0 },
-      createdAt: serverTimestamp(),
-
-      daoAddress: p.daoAddress ?? null,
-      daoName: p.daoName ?? null,
-
-      // 🔗 on-chain linkage
-      offchainRef: p.offchainRef ?? null,
-      descriptionHash: p.descriptionHash ?? null,
-      reservedId: p.reservedId ?? null,
-      txHash: p.txHash ?? null,
-      onchainReserved: p.onchainReserved ?? false,
-    }
-
-
-    const ref = await addDoc(collection(db, 'proposals'), docData)
-    return { id: ref.id }
-
-  } catch (err: any) {
-    throw new Error(err?.message || String(err))
-  }
-} */
 
 export type SubmissionPatch = {
   txHash: Hex
@@ -749,97 +846,7 @@ export type SubmissionPatch = {
   actionsSnapshot?: { targets: string[]; valuesWei: string[]; calldatas: string[] } | null
   updatedAt?: any
 }
-/* 
-export async function promoteProposal(id: string, patch: SubmissionPatch): Promise<{ id: string }>
-export async function promoteProposal(_daoId: string, id: string, patch: SubmissionPatch): Promise<{ id: string }>
-export async function promoteProposal(a: string, b: any, c?: SubmissionPatch): Promise<{ id: string }> {
-  const isThreeArgs = typeof c === 'object'
-  const proposalId = (isThreeArgs ? b : a) as string
-  const p = (isThreeArgs ? c : b) as SubmissionPatch
 
-  if (!proposalId) throw new Error('promoteProposal: missing proposal id')
-  if (!p?.txHash) throw new Error('promoteProposal: missing submitTxHash')
-
-  const payload = {
-    phase: 'onchain',
-    status: 'submitted',
-    submitTxHash: p.txHash,
-    ...(p.offchainRef ? { offchainRef: p.offchainRef } : {}),
-    ...(p.descriptionHash ? { descriptionHash: p.descriptionHash } : {}),
-    ...(typeof p.bodyMd === 'string' ? { bodyMd: p.bodyMd } : {}),
-    updatedAt: p.updatedAt ?? serverTimestamp(),
-  }
-
-  console.debug('[promoteProposal] writing to Firestore', { proposalId, payload })
-
-  const ref = doc(db, 'proposals', proposalId)
-  await setDoc(ref, payload, { merge: true })
-
-  return { id: proposalId }
-} */
-
-
-/* export async function debugPromoteProposalUpdate(proposalId: string, patch: SubmissionPatch) {
-  if (!proposalId) {
-    alert('❌ Missing proposalId');
-    return false
-  }
-  if (!patch?.txHash) {
-    alert('❌ Missing submitTxHash in patch');
-    return false
-  }
-
-  const payload: any = {
-    phase: 'onchain',
-    status: 'submitted',
-    txHash: patch.txHash,
-    ...(patch.offchainRef ? { offchainRef: patch.offchainRef } : {}),
-    ...(patch.descriptionHash ? { descriptionHash: patch.descriptionHash } : {}),
-    ...(typeof patch.bodyMd === 'string' ? { bodyMd: patch.bodyMd } : {}),
-    updatedAt: patch.updatedAt ?? serverTimestamp(),
-  }
-
-  const ref = doc(db, 'proposals', proposalId)
-
-  try {
-    // Write (same as your promoteProposal)
-    await setDoc(ref, payload, { merge: true })
-
-    // Read back a few fields so you can confirm what landed
-    const snap = await getDoc(ref)
-    if (!snap.exists()) {
-      alert(`⚠️ Wrote, but doc not found on read: proposals/${proposalId}`)
-      return false
-    }
-
-    const d = snap.data() as any
-    const updatedAtIso =
-      d?.updatedAt instanceof Timestamp ? d.updatedAt.toDate().toISOString() : String(d?.updatedAt)
-
-    const summary = {
-      id: proposalId,
-      phase: d?.phase,
-      status: d?.status,
-      txHash: d?.txHash,
-      offchainRef: d?.offchainRef,
-      descriptionHash: d?.descriptionHash,
-      bodyMdLen: typeof d?.bodyMd === 'string' ? d.bodyMd.length : 0,
-      updatedAt: updatedAtIso,
-    }
-
-    alert(`✅ promote dummy update SUCCESS\n\n${JSON.stringify(summary, null, 2)}`)
-    console.log('[debugPromoteProposalUpdate] success', { summary, full: d })
-    return true
-  } catch (e: any) {
-    const msg = `[promote dummy] ❌ ERROR
-Name: ${e?.name}
-Code: ${e?.code}
-Message: ${e?.message}`
-    alert(msg)
-    console.error(msg, e)
-    return false
-  }
-} */
 
 export function derivePhase(r: any): Phase {
   if (r?.phase === 'discussion' || r?.phase === 'onchain') return r.phase
@@ -849,19 +856,7 @@ export function derivePhase(r: any): Phase {
     : 'discussion'
 }
 
-/* export function derivePhase(
-  r: any,
-  chain?: { state?: number | null }
-): Phase {
-  if (chain?.state !== undefined && chain?.state !== null) {
-    // DRAFT stays discussion; everything else is onchain
-    return chain.state === STATE.DRAFT ? 'discussion' : 'onchain'
-  }
-  const s = (r?.status || '').toLowerCase()
-  return ['submitted', 'active', 'deciding', 'approved', 'rejected', 'queued', 'executed'].includes(s)
-    ? 'onchain'
-    : 'discussion'
-} */
+
 
 export async function fetchProposals(limitCount?: number, daoId?: string, phase?: Phase): Promise<any[]>
 export async function fetchProposals(daoId: string, phase?: Phase): Promise<any[]>
@@ -1066,6 +1061,7 @@ export async function upsertDaoChainParams(
     admin: string
     token: string
     treasury: string
+    bank?: string
     votingDelayBlocks: number
     votingPeriodBlocks: number
     quorumBps: number
@@ -1077,9 +1073,11 @@ export async function upsertDaoChainParams(
     ref,
     {
       ...(p.daoAddress ? { daoAddress: p.daoAddress } : {}),
+      // 👇 NEW: store bank if provided
+      ...(p.bank ? { bank: p.bank } : {}),
       // simple mirrors
       admin: p.admin,
-      token: p.token,
+      votesToken: p.token,
       treasury: p.treasury,
       // normalized voting config bucket (what normalizeVotingConfig() already reads)
       votingConfig: {
