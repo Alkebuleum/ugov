@@ -6,7 +6,7 @@ import {
   buildActionsFromDraft,
   buildActionsFromDraftAsync,
   Actions,
-} from '../lib/daoProposalActions'
+} from '../lib/buildActionsFromDraft'
 import { useAuth } from 'amvault-connect'
 import {
   simulateCastVote, castVoteOnchain, SUPPORT,
@@ -16,7 +16,7 @@ import {
   delegateToSelf,
   BLOCK_TIME_SEC,
   VotingFlags,
-  debugVotingPower,
+  //debugVotingPower,
   readVotingPower,
   getMyVote,
   readCurrentDelegatedPower,
@@ -26,9 +26,8 @@ import {
   simulateExecute,
   getQueuedEtaSec,
   cancelByAuthorOnchain,
-  reserveDraftOnchain,
   readHeldTargetOnChain,
-  readHoldCountOnChain
+  readHoldCountOnChain,
 } from '../lib/daoProposals'
 import {
   Hex,
@@ -45,14 +44,14 @@ import {
   setProposalHoldPair
 
 } from '../lib/firebase'
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import Markdown from '../lib/markdown'
 import { formatLocalId, formatTimeAgo } from '../lib/format'
 //import Avatar from '../components/Avatar'
 import StatusChip from '../components/StatusChip'
-import { submitForVoteOnchain, computeOffchainRef, computeDescriptionHash, simulateSubmitForVote } from '../lib/daoProposals'
+import { submitForVoteOnchain } from '../lib/daoProposals'
 import {
   addComment,
   fetchProposal,
@@ -80,15 +79,12 @@ import {
   Share2,
   Link as LinkIcon,
   Bell,
-  Clock8,
   Tag,
   Banknote,
   IdCard,
   Activity,
   Loader2,
   GaugeCircle,
-  Timer,
-  CheckCircle2,
   MinusCircle,
   XCircle,
   CircleHelp,
@@ -117,7 +113,6 @@ const ENABLE_SUBSCRIPTIONS = false;
 
 // Brand-danger for "No"
 const NO_BG = '#D61F45';
-const NO_BG_HOVER = '#B71A39';
 
 // Tiny swatch + label chip used in the legend
 const LegendChip: React.FC<{
@@ -934,6 +929,130 @@ export default function ProposalDetail() {
       )
     }
 
+    // BANK
+    if (cat === 'BANK') {
+      const b = it?.bank || {}
+      const act = String(b.actionType || '').toUpperCase()
+
+      // CREATE: multiple accounts
+      if (act === 'CREATE') {
+        const rows: any[] = Array.isArray(b.createAccounts)
+          ? b.createAccounts.filter(r => (r?.account || '').trim())
+          : []
+
+        return (
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <Banknote size={16} className="text-ink/80" />
+              <span className="font-medium">Create bank account(s)</span>
+            </div>
+
+            <div className="pl-6 space-y-1">
+              {rows.length === 0 && (
+                <div className="text-slate">No accounts configured.</div>
+              )}
+              {rows.map((row, i) => (
+                <div key={i} className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+                  <span className="font-mono text-xs sm:text-sm">
+                    #{i + 1}: {row.account}
+                  </span>
+                  <span className="text-slate text-xs sm:text-sm">
+                    · Asset: {row.asset || 'AKE'}
+                  </span>
+                  {row.note && (
+                    <span className="text-slate text-xs sm:text-sm">
+                      · {row.note}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      }
+
+      // SPEND
+      if (act === 'SPEND') {
+        return (
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <Banknote size={16} className="text-ink/80" />
+              <span className="font-medium">Spend from bank account</span>
+            </div>
+            <div className="pl-6 space-y-1">
+              <div>
+                <span className="text-slate">Account:</span>{' '}
+                <span className="font-mono">{b.account || '—'}</span>
+              </div>
+              <div>
+                <span className="text-slate">Amount:</span>{' '}
+                <span className="font-mono">
+                  {b.amount ?? '—'} {b.asset || 'AKE'}
+                </span>
+              </div>
+              {b.recipient && (
+                <div className="flex items-start gap-2">
+                  <span className="text-slate shrink-0">Recipient:</span>
+                  <code className="font-mono px-1.5 py-0.5 rounded bg-brand-bg border border-brand-line max-w-full break-all text-xs sm:text-[13px]">
+                    {b.recipient}
+                  </code>
+                </div>
+              )}
+              {b.note && (
+                <div className="text-slate text-xs">Note: {b.note}</div>
+              )}
+            </div>
+          </div>
+        )
+      }
+
+      // CONFIG
+      if (act === 'CONFIG') {
+        return (
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <Settings2 size={16} className="text-ink/80" />
+              <span className="font-medium">Update bank account</span>
+            </div>
+            <div className="pl-6 space-y-1">
+              <div>
+                <span className="text-slate">Account:</span>{' '}
+                <span className="font-mono">{b.account || '—'}</span>
+              </div>
+              {b.note && (
+                <div className="text-slate text-xs whitespace-pre-wrap">
+                  {b.note}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      }
+
+      // CLOSE
+      if (act === 'CLOSE') {
+        return (
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <Banknote size={16} className="text-ink/80" />
+              <span className="font-medium">Close bank account</span>
+            </div>
+            <div className="pl-6 space-y-1">
+              <div>
+                <span className="text-slate">Account:</span>{' '}
+                <span className="font-mono">{b.account || '—'}</span>
+              </div>
+              {b.note && (
+                <div className="text-slate text-xs whitespace-pre-wrap">
+                  {b.note}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      }
+    }
+
 
     // MULTI (show a small list of sub-actions)
     if (cat === 'MULTI' && Array.isArray(it?.items) && it.items.length > 0) {
@@ -1087,24 +1206,24 @@ export default function ProposalDetail() {
       setDelegateNotice('Delegation recorded ✅')
       setActionError(null)
 
-      // 5) Dump a compact debug line into the error box for quick inspection
-      try {
-        const d = await debugVotingPower(itm.daoAddress, session.address!, itm.reservedId)
-        setActionError(
-          [
-            'Debug:',
-            ` token=${d.token}`,
-            ` balance=${d.balance.toString()}`,
-            ` chainBlock=${d.chainBlock}`,
-            ` voteStart=${d.voteStart}`,
-            ` snapshotBlock=${d.snapshotBlock}`,
-            ` nowVotes=${d.nowVotes.toString()}`,
-            ` snapshotVotes=${d.snapshotVotes.toString()}`,
-            ` delegatedTo=${d.delegatedTo ?? '—'}`,
-            delegationBlock != null ? ` delegationTxBlock=${delegationBlock}` : '',
-          ].filter(Boolean).join(' | ')
-        )
-      } catch { }
+      /*  // 5) Dump a compact debug line into the error box for quick inspection
+       try {
+         const d = await debugVotingPower(itm.daoAddress, session.address!, itm.reservedId)
+         setActionError(
+           [
+             'Debug:',
+             ` token=${d.token}`,
+             ` balance=${d.balance.toString()}`,
+             ` chainBlock=${d.chainBlock}`,
+             ` voteStart=${d.voteStart}`,
+             ` snapshotBlock=${d.snapshotBlock}`,
+             ` nowVotes=${d.nowVotes.toString()}`,
+             ` snapshotVotes=${d.snapshotVotes.toString()}`,
+             ` delegatedTo=${d.delegatedTo ?? '—'}`,
+             delegationBlock != null ? ` delegationTxBlock=${delegationBlock}` : '',
+           ].filter(Boolean).join(' | ')
+         )
+       } catch { } */
     } catch (e: any) {
       setError(e?.message || 'Delegate failed.')
     } finally {
@@ -1282,6 +1401,95 @@ export default function ProposalDetail() {
         return await buildActionsFromDraftAsync(Actions.multi(mapped))
       }
 
+      case 'BANK': {
+        const bankCfg = item.bank || {}
+        const act = String(bankCfg.actionType || '').toUpperCase()
+
+        // Get DAO bank address (from payload or DAO)
+        const bankAddress =
+          bankCfg.bankAddress || (await fetchDaoBank(item.daoAddress))
+        if (!bankAddress) {
+          throw new Error('BANK: missing bank address for this DAO')
+        }
+
+        // Default asset symbol if not provided
+        const asset = String(bankCfg.asset || 'AKE').trim()
+
+        if (act === 'CREATE') {
+          const rows: any[] = Array.isArray(bankCfg.createAccounts)
+            ? bankCfg.createAccounts.filter((r) => (r?.account || '').trim())
+            : []
+
+          if (!rows.length) throw new Error('BANK: no accounts configured to create')
+
+          const bankActions = rows.map((row) =>
+            Actions.bankCreateAccount(
+              bankAddress,
+              String(row.account).trim(),
+              String(row.asset || asset).trim(),
+              BigInt(row.budgetWei ?? 0n),
+              BigInt(row.annualLimitWei ?? 0n),
+            )
+          )
+
+          return await buildActionsFromDraftAsync(Actions.multi(bankActions))
+        }
+
+        if (act === 'SPEND') {
+          if (!bankCfg.account) throw new Error('BANK SPEND: missing account id')
+          if (bankCfg.amount == null) throw new Error('BANK SPEND: missing amount')
+          if (!bankCfg.recipient) throw new Error('BANK SPEND: missing recipient')
+
+          const spendAction = Actions.bankSpendFromAccount(
+            bankAddress,
+            String(bankCfg.account).trim(),
+            asset,
+            String(bankCfg.recipient).trim(),
+            bankCfg.amount, // will be converted → wei
+          )
+
+          return await buildActionsFromDraftAsync(spendAction)
+        }
+
+        if (act === 'CONFIG') {
+          if (!bankCfg.account) throw new Error('BANK CONFIG: missing account id')
+
+          const budgetStr = bankCfg.budgetWei
+          const annualStr = bankCfg.annualLimitWei
+
+          if (!budgetStr && !annualStr) {
+            throw new Error(
+              'BANK CONFIG: no budget/annualLimit change configured on proposal'
+            )
+          }
+
+          const cfgAction = Actions.bankUpdateAccountBudget(
+            bankAddress,
+            String(bankCfg.account).trim(),
+            asset,
+            budgetStr ?? 0n,
+            annualStr ?? 0n,
+          )
+
+          return await buildActionsFromDraftAsync(cfgAction)
+        }
+
+        if (act === 'CLOSE') {
+          if (!bankCfg.account) throw new Error('BANK CLOSE: missing account id')
+
+          const closeAction = Actions.bankCloseAccount(
+            bankAddress,
+            String(bankCfg.account).trim(),
+            asset,
+          )
+
+          return await buildActionsFromDraftAsync(closeAction)
+        }
+
+        throw new Error(`Unsupported BANK actionType: ${bankCfg.actionType || 'unknown'}`)
+      }
+
+
 
       // Fallback: if the draft only sets quorumChangeBps without a formal category
       default: {
@@ -1336,10 +1544,10 @@ export default function ProposalDetail() {
     if (!confirmBond || !confirmItem) return
     setConfirmOpen(false)
 
-    setPromoting(true);
+    setPromoting(true)
 
-    // open AmVault FIRST so it appears immediately
-    //const popup = preOpenAmvaultPopup()
+    // 🔧 Toggle this to false when you're ready to send real txs
+    const DRY_RUN = false
 
     try {
       // (A) Build the exact actions
@@ -1356,18 +1564,45 @@ export default function ProposalDetail() {
         desc: String(confirmItem.summary || ''),
       })
 
-      // (C) Preflight (must include value + from)
-      /* 
-           await simulateSubmitForVote(confirmItem.daoAddress, {
-             localId: confirmItem.reservedId,
-             targets,
-             valuesWei,
-             calldatas,
-             descriptionHash,
-           }, session.address!) */
+      // 🧪 DRY RUN: just log what we *would* send and bail out
+      if (DRY_RUN) {
+        console.log('[uGov] DRY RUN – submitForVote payload:', {
+          daoAddress: confirmItem.daoAddress,
+          localId: confirmItem.reservedId,
+          targets,
+          // bigint → string for readability
+          valuesWei: valuesWei.map((v) => v.toString()),
+          calldatas,
+          descriptionHash,
+          bondValueWei: confirmBond.valueWei.toString(),
+          cancelProposalId: cancelId,
+        })
 
+        // You can also pretty-print each call if you like:
+        calldatas.forEach((cd, i) => {
+          console.log(`  call[${i}] →`, {
+            target: targets[i],
+            valueWei: valuesWei[i].toString(),
+            calldata: cd,
+          })
+        })
 
-      // (D) Submit payable tx
+        setPromoting(false)
+        return
+      }
+
+      // (C) Preflight (optional, still commented out)
+      /*
+      await simulateSubmitForVote(confirmItem.daoAddress, {
+        localId: confirmItem.reservedId,
+        targets,
+        valuesWei,
+        calldatas,
+        descriptionHash,
+      }, session.address!)
+      */
+
+      // (D) Submit payable tx (REAL THING – only runs when DRY_RUN === false)
       const { txHash } = await submitForVoteOnchain(
         confirmItem.daoAddress,
         {
@@ -1395,28 +1630,27 @@ export default function ProposalDetail() {
         actionsSnapshot: serializeActionsSnapshot(targets, valuesWei, calldatas),
       })
 
-      // NEW: if this is an EMERGENCY_CANCEL, set the hold links (A ↔ B)
       if (
         String(confirmItem.category).toUpperCase() === 'EMERGENCY_CANCEL' &&
         cancelId > 0
       ) {
         await setProposalHoldPair({
           daoAddress: confirmItem.daoAddress,
-          targetReservedId: cancelId,               // A: the proposal being held
-          holdingDocId: id!,                        // B: this proposal’s Firestore id
-          holdingReservedId: confirmItem.reservedId // B: its on-chain local id
+          targetReservedId: cancelId,
+          holdingDocId: id!,
+          holdingReservedId: confirmItem.reservedId,
         })
       }
 
       nav('/proposals')
-
     } catch (err: any) {
       console.error('[proposal:submitToVote] failed:', err)
       setActionError(err?.message || 'Submission failed.')
     } finally {
-      setPromoting(false);
+      setPromoting(false)
     }
   }
+
 
 
 
@@ -1567,6 +1801,16 @@ export default function ProposalDetail() {
   }
 
 
+
+
+
+
+
+
+
+
+
+
   async function fetchDaoTreasury(daoAddr: string): Promise<string | null> {
     try {
       const daosRef = collection(db, 'daos');
@@ -1583,6 +1827,30 @@ export default function ProposalDetail() {
     }
     return null;
   }
+
+  async function fetchDaoBank(daoAddr: string): Promise<string | null> {
+    try {
+      const daosRef = collection(db, 'daos')
+
+      // Exact match on DAO address (same pattern as fetchDaoTreasury)
+      const q = query(daosRef, where('address', '==', daoAddr), limit(1))
+      const snap = await getDocs(q)
+
+      if (!snap.empty) {
+        const data = snap.docs[0].data() as any
+        const bank = data?.bank as string | undefined
+
+        if (bank && ethers.isAddress(bank)) {
+          // normalize checksum just like with treasury
+          return ethers.getAddress(bank)
+        }
+      }
+    } catch {
+      // swallow and fall through to null
+    }
+    return null
+  }
+
 
 
   const onExecute = async (itm: any) => {
@@ -1689,6 +1957,7 @@ export default function ProposalDetail() {
       }
 
       // 4  preflight (throws with a readable reason on failure)
+
       await simulateExecute(itm.daoAddress, { localId: itm.reservedId })
 
       // 5) Execute
@@ -1952,7 +2221,6 @@ export default function ProposalDetail() {
                 )}
 
                 {/* --- OPEN window: compact controls + info --- */}
-                {/* was: chainUI.isOpen */}
                 {ui.open && (
                   <>
                     {/* Row A — buttons + voting power (left), ends-in (right) */}
@@ -2062,9 +2330,8 @@ export default function ProposalDetail() {
                   </>
                 )}
 
-                {!chainUI.isOpen && chainUI.hasEnded && progress && powerInfo && (
+                {/* {!chainUI.isOpen && chainUI.hasEnded && progress && powerInfo && (
                   <div className="w-full mt-3">
-                    {/* was: chainUI.showFinalize */}
                     {ui.finalize && (
                       <div className="mb-2 flex items-center gap-2">
                         <span
@@ -2088,7 +2355,62 @@ export default function ProposalDetail() {
                       symbol={powerInfo.symbol || ''}
                     />
                   </div>
+                )} */}
+                {!chainUI.isOpen && chainUI.hasEnded && progress && powerInfo && (
+                  <div className="w-full mt-3">
+                    {(() => {
+                      // compute outcome like Success Criteria
+                      let passed: boolean | null = null
+
+                      if (supplyInfo) {
+                        const forV = progress.forVotes ?? 0n
+                        const agV = progress.againstVotes ?? 0n
+                        const abV = progress.abstainVotes ?? 0n
+
+                        const quorumReq = supplyInfo.quorumRequired ?? 0n
+                        const turnoutForQuorum = forV + abV
+                        const reachedQuorum = turnoutForQuorum >= quorumReq
+                        const majorityFor = forV > agV
+
+                        passed = reachedQuorum && majorityFor
+                      }
+
+                      const isPass =
+                        passed !== null
+                          ? passed
+                          : (chainUI.state === STATE.SUCCEEDED ||
+                            chainUI.state === STATE.QUEUED ||
+                            chainUI.state === STATE.EXECUTED)
+
+                      return (
+                        <>
+                          <div className="mb-2 flex items-center gap-2">
+                            <span
+                              className={`px-2 py-1 rounded-full border text-xs ${isPass
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-rose-50 text-rose-700 border-rose-200'
+                                }`}
+                            >
+                              {isPass ? 'Passed' : 'Failed'}
+                            </span>
+                            <span className="text-slate text-xs">Final results</span>
+                          </div>
+
+                          <TallyStrip
+                            forVotes={progress.forVotes}
+                            againstVotes={progress.againstVotes}
+                            abstainVotes={progress.abstainVotes}
+                            total={progress.totalVotes}
+                            fmt={(v) => fmtUnits(v, powerInfo.decimals)}
+                            symbol={powerInfo.symbol || ''}
+                          />
+                        </>
+                      )
+                    })()}
+                  </div>
                 )}
+
+
                 {/* --- When Cancelled --- */}
                 {chainUI.showCanceled && (
                   <span className="px-2 py-1 rounded-full border bg-rose-50 text-rose-700 border-rose-200 text-sm">
@@ -2149,41 +2471,60 @@ export default function ProposalDetail() {
                     type="button"
                     className="px-3 py-2 rounded-xl border border-brand-line hover:bg-brand-line/40 mr-2"
                     onClick={() => {
+                      const cat = String(item.category || '').toUpperCase()
 
-                      nav('/proposals/new', {
-                        state: {
-                          prefill: {
-                            proposalId: id,
-                            reservedId: item.reservedId,
-                            title: item.title,
-                            summary: item.summary,
-                            category: item.category,
-                            tags: Array.isArray(item.tags) ? item.tags.join(', ') : '',
-                            body: stripAutoHeader(item.bodyMd),
+                      const prefill: any = {
+                        proposalId: id,
+                        reservedId: item.reservedId,
+                        title: item.title,
+                        summary: item.summary,
+                        category: item.category,
+                        tags: Array.isArray(item.tags) ? item.tags.join(', ') : '',
+                        body: stripAutoHeader(item.bodyMd),
 
-                            // category-specific
-                            budget: item.budget || null,
-                            votingDelayBlocks: item.votingDelayBlocks,
-                            votingPeriodBlocks: item.votingPeriodBlocks,
-                            quorumBps: item.quorumBps,
-                            treasuryTimelockSec: item.treasuryTimelockSec,
-                            newAdmin: item.newAdmin,
-                            newToken: item.newToken,
-                            cancelTargetId: item.cancelTargetId ? String(item.cancelTargetId) : '',
+                        // category-specific
+                        budget: item.budget || null,
+                        votingDelayBlocks: item.votingDelayBlocks,
+                        votingPeriodBlocks: item.votingPeriodBlocks,
+                        quorumBps: item.quorumBps,
+                        treasuryTimelockSec: item.treasuryTimelockSec,
+                        newAdmin: item.newAdmin,
+                        newToken: item.newToken,
+                        cancelTargetId: item.cancelTargetId ? String(item.cancelTargetId) : '',
 
-                            // meta
-                            discussionUrl: item.discussionUrl || '',
-                            references: Array.isArray(item.references)
-                              ? item.references.join('\n')
-                              : '',
-                          },
-                        },
-                      })
+                        // meta
+                        discussionUrl: item.discussionUrl || '',
+                        references: Array.isArray(item.references)
+                          ? item.references.join('\n')
+                          : '',
+                      }
+
+                      // 🏦 BANK create-account prefill
+                      if (cat === 'BANK') {
+                        const bank = item.bank || {}
+                        prefill.bank = {
+                          actionType: bank.actionType || 'CREATE',
+                          // keep the rows exactly as stored so the editor can show them
+                          createAccounts: Array.isArray(bank.createAccounts)
+                            ? bank.createAccounts
+                            : [],
+                          // if you also store single-account fields for CONFIG/SPEND/CLOSE,
+                          // they can be forwarded too:
+                          account: bank.account || '',
+                          asset: bank.asset || 'AKE',
+                          amount: bank.amount || '',
+                          annualLimit: bank.annualLimit || '',
+                          note: bank.note || '',
+                        }
+                      }
+
+                      nav('/proposals/new', { state: { prefill } })
                     }}
                   >
                     Edit draft
                   </button>
                 )}
+
 
                 <button
                   className="btn"

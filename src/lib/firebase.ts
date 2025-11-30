@@ -478,9 +478,17 @@ export type NewProposal = {
     asset?: string | null
     recipient?: string | null
     note?: string | null
+
+    // 🔹 new optional config fields (single account)
+    budgetWei?: string | null
+    annualLimitWei?: string | null
+
+    // 🔹 CREATE: per-account config
     createAccounts?: Array<{
       account: string
       asset: string | null
+      budgetWei?: string | null
+      annualLimitWei?: string | null
       note?: string | null
     }> | null
   } | null
@@ -560,9 +568,16 @@ type ProposalDoc = {
     asset?: string | null
     recipient?: string | null
     note?: string | null
+
+    // 🔹 persisted config fields
+    budgetWei?: string | null
+    annualLimitWei?: string | null
+
     createAccounts?: {
       account: string
       asset: string | null
+      budgetWei?: string | null
+      annualLimitWei?: string | null
       note?: string | null
     }[] | null
   } | null
@@ -633,6 +648,8 @@ export async function createProposal(daoId: string, p: NewProposal) {
           p.bank.asset ||
           p.bank.recipient ||
           p.bank.note ||
+          p.bank.budgetWei ||
+          p.bank.annualLimitWei ||
           (p.bank.createAccounts && p.bank.createAccounts.length)
         )
         ? {
@@ -643,18 +660,27 @@ export async function createProposal(daoId: string, p: NewProposal) {
             asset: p.bank.asset ?? null,
             recipient: p.bank.recipient ?? null,
             note: strOrNull(p.bank.note),
+
+            // 🔹 single-account config (CONFIG)
+            budgetWei: strOrNull(p.bank.budgetWei),
+            annualLimitWei: strOrNull(p.bank.annualLimitWei),
+
+            // 🔹 multi-create accounts (CREATE)
             createAccounts: Array.isArray(p.bank.createAccounts)
               ? p.bank.createAccounts
                 .map((r) => ({
                   account: String(r.account || '').trim(),
                   asset: r.asset ?? null,
+                  budgetWei: strOrNull(r.budgetWei),
+                  annualLimitWei: strOrNull(r.annualLimitWei),
                   note: r.note != null ? String(r.note) : null,
                 }))
-                .filter((r) => r.account) // drop empty rows
+                .filter((r) => r.account)
               : null,
           },
         }
         : { bank: null as ProposalDoc['bank'] }
+
 
     const docData: ProposalDoc = {
       daoId,
@@ -1089,5 +1115,98 @@ export async function upsertDaoChainParams(
       chainParamsUpdatedAt: serverTimestamp(),
     },
     { merge: true }
+  )
+}
+
+
+
+
+// --- Bank accounts --------------------------------------------------------
+
+export type BankAccount = {
+  id: string                    // Firestore doc id (same as accountId)
+  accountId: string             // bytes32 hex, e.g. 0xabc...
+  code?: string            // 👈 NEW: human-readable id like "1" or "1.1"
+  label?: string                // human-readable name: "Ops", "Grants", etc.
+  description?: string          // pretty description for UI
+  // Optional: per-account token subset; if empty, use DAO.trackedTokens
+  trackedTokens?: TrackedToken[]
+  createdAt?: Timestamp | FieldValue
+  updatedAt?: Timestamp | FieldValue
+}
+
+
+
+function normalizeAccountIdHex(accountId: string): string {
+  const s = String(accountId || '').trim()
+  if (!s) throw new Error('Account id is required')
+
+  // 1) If already a full 32-byte 0x hex, accept as-is (matches your `if` in toAccountIdBytes32)
+  if (/^0x[0-9a-fA-F]{64}$/.test(s)) {
+    return s.toLowerCase()
+  }
+
+  // 2) Otherwise, hash the label the same way you did on-chain
+  //    ethers.id() === keccak256(utf8Bytes(s))
+  return ethers.id(s)
+}
+
+
+
+export function bankAccountsCollection(daoId: string) {
+  return collection(db, 'daos', daoId, 'bankAccounts')
+}
+
+/** Create or update a bank account metadata doc under /daos/{daoId}/bankAccounts */
+export async function upsertBankAccount(
+  daoId: string,
+  input: {
+    accountId: string
+    label?: string
+    description?: string
+    trackedTokens?: TrackedToken[]
+  }
+) {
+  const accountId = normalizeAccountIdHex(input.accountId)
+  const cref = bankAccountsCollection(daoId)
+  const ref = doc(cref, accountId)
+
+  const payload = sanitizeForFirestore({
+    accountId,                  // normalized bytes32
+    code: input.accountId,      // human code: "1", "1.1", etc.
+    label: input.label ?? null,
+    description: input.description ?? null,
+    ...(input.trackedTokens && input.trackedTokens.length
+      ? { trackedTokens: input.trackedTokens.slice(0, 3) }
+      : {}),
+    updatedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+  })
+
+
+  await setDoc(ref, payload, { merge: true })
+}
+
+/** Realtime listener for all bank accounts of a DAO. */
+export function listenBankAccounts(
+  daoId: string,
+  cb: (accounts: BankAccount[]) => void
+) {
+  const cref = bankAccountsCollection(daoId)
+  const qref = query(cref, orderBy('createdAt', 'asc'))
+
+  return onSnapshot(
+    qref,
+    (snap) => {
+      const rows: BankAccount[] = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+      }))
+      cb(rows)
+    },
+    (e) => {
+      console.error('[bankAccounts] listen error:', e)
+      cb([])
+    }
   )
 }

@@ -1,8 +1,13 @@
 // src/lib/buildActionsFromDraft.ts
 import { ethers } from 'ethers'
 import { CHAIN } from './chain'
-import { computeDescriptionHash } from './daoProposals' // if you need it elsewhere; not required here
-import { DAO_ABI, ERC20_ABI, TREASURY_ABI } from './abi'
+import { DAO_ABI, DAO_BANK_FACTORY_ABI, ERC20_ABI, TREASURY_ABI } from './abi'
+import {
+    encodeCreateAccount,
+    encodeSpendFromAccount,
+    encodeUpdateAccountBudget,
+    encodeCloseAccount,
+} from './daoBank'
 
 
 
@@ -15,6 +20,10 @@ export type DraftCategory =
     | 'SET_VOTE_TOKEN'
     | 'TREASURY_NATIVE_TRANSFER'   // send ETH from treasury
     | 'TREASURY_ERC20_TRANSFER'    // ERC20.transfer(...) from treasury
+    | 'BANK_CREATE_ACCOUNT'        // NEW: create a UGov bank via factory
+    | 'BANK_SPEND_FROM_ACCOUNT'       // 👈 NEW
+    | 'BANK_UPDATE_ACCOUNT_BUDGET'    // 👈 NEW
+    | 'BANK_CLOSE_ACCOUNT'            // 👈 NEW
     | 'MULTI'                       // array of sub-actions
 
 export type BuildDraftParams =
@@ -43,7 +52,7 @@ export type BuildDraftParams =
     }
     | {
         category: 'TREASURY_NATIVE_TRANSFER'
-        // NOTE: this will execute from Treasury, which supplies the value (ETH)
+        // NOTE: Executed via the timelock/treasury, which holds the native balance
         to: string
         valueWei: bigint | number | string
     }
@@ -54,9 +63,48 @@ export type BuildDraftParams =
         amount: bigint | number | string // raw units
     }
     | {
+        category: 'BANK_CREATE_ACCOUNT'
+        bankAddress: string
+        accountId: string
+        asset: string
+        budgetWei: bigint | number | string
+        annualLimitWei: bigint | number | string
+    }
+    | {
+        category: 'BANK_SPEND_FROM_ACCOUNT'
+        bankAddress: string
+        accountId: string
+        asset: string
+        to: string
+        amountWei: bigint | number | string
+    }
+    | {
+        category: 'BANK_UPDATE_ACCOUNT_BUDGET'
+        bankAddress: string
+        accountId: string
+        asset: string
+        newBudgetWei: bigint | number | string
+        newAnnualLimitWei: bigint | number | string
+    }
+    | {
+        category: 'BANK_CLOSE_ACCOUNT'
+        bankAddress: string
+        accountId: string
+        asset: string
+    }
+    | {
         category: 'MULTI'
         items: BuildDraftParams[]
     }
+
+/* ------------------------- helper -----------------------------------------*/
+function normalizeAsset(asset: string): string {
+    const t = asset.trim().toUpperCase()
+    // Your convention: AKE/ALKE = native ALKE -> ZeroAddress
+    if (t === 'AKE' || t === 'ALKE') return ethers.ZeroAddress
+    // Otherwise treat as ERC20 address
+    return ensureAddr(asset, 'asset')
+}
 
 /* ------------------------- Low-level encoders ----------------------------- */
 
@@ -67,6 +115,7 @@ function ensureAddr(a: string, label: string) {
 const DaoI = new ethers.Interface(DAO_ABI)
 const Erc20I = new ethers.Interface(ERC20_ABI)
 const TreasI = new ethers.Interface(TREASURY_ABI)
+const BankFactoryI = new ethers.Interface(DAO_BANK_FACTORY_ABI)
 
 
 /* A single, normalized action unit */
@@ -151,6 +200,62 @@ function flattenActions(input: BuildDraftParams): Action[] {
             // Treasury calls token.transfer(to, amount) with 0 value
             return [{ target: token, valueWei: 0n, calldata: data }]
         }
+
+        case 'BANK_CREATE_ACCOUNT': {
+            const bank = ensureAddr(input.bankAddress, 'bankAddress')
+            const asset = normalizeAsset(input.asset)
+
+            const data = encodeCreateAccount({
+                accountId: input.accountId,
+                asset,
+                budget: BigInt(input.budgetWei as any),
+                annualLimit: BigInt(input.annualLimitWei as any),
+            })
+
+            return [{ target: bank, valueWei: 0n, calldata: data }]
+        }
+
+        case 'BANK_SPEND_FROM_ACCOUNT': {
+            const bank = ensureAddr(input.bankAddress, 'bankAddress')
+            const asset = normalizeAsset(input.asset)
+            const to = ensureAddr(input.to, 'to')
+
+            const data = encodeSpendFromAccount({
+                accountId: input.accountId,
+                asset,
+                to,
+                amount: input.amountWei,
+            })
+
+            return [{ target: bank, valueWei: 0n, calldata: data }]
+        }
+
+        case 'BANK_UPDATE_ACCOUNT_BUDGET': {
+            const bank = ensureAddr(input.bankAddress, 'bankAddress')
+            const asset = normalizeAsset(input.asset)
+
+            const data = encodeUpdateAccountBudget({
+                accountId: input.accountId,
+                asset,
+                newBudget: BigInt(input.newBudgetWei as any),
+                newAnnualLimit: BigInt(input.newAnnualLimitWei as any),
+            })
+
+            return [{ target: bank, valueWei: 0n, calldata: data }]
+        }
+
+        case 'BANK_CLOSE_ACCOUNT': {
+            const bank = ensureAddr(input.bankAddress, 'bankAddress')
+            const asset = normalizeAsset(input.asset)
+
+            const data = encodeCloseAccount({
+                accountId: input.accountId,
+                asset,
+            })
+
+            return [{ target: bank, valueWei: 0n, calldata: data }]
+        }
+
 
         case 'MULTI': {
             const out: Action[] = []
@@ -265,6 +370,69 @@ export const Actions = {
     },
     erc20Transfer(token: string, to: string, amount: bigint | number | string): BuildDraftParams {
         return { category: 'TREASURY_ERC20_TRANSFER', token, to, amount }
+    },
+    bankCreateAccount(
+        bankAddress: string,
+        accountId: string,
+        asset: string,
+        budgetWei: bigint | number | string,
+        annualLimitWei: bigint | number | string,
+    ): BuildDraftParams {
+        return {
+            category: 'BANK_CREATE_ACCOUNT',
+            bankAddress,
+            accountId,
+            asset,
+            budgetWei,
+            annualLimitWei,
+        }
+    },
+
+    bankSpendFromAccount(
+        bankAddress: string,
+        accountId: string,
+        asset: string,
+        to: string,
+        amountWei: bigint | number | string,
+    ): BuildDraftParams {
+        return {
+            category: 'BANK_SPEND_FROM_ACCOUNT',
+            bankAddress,
+            accountId,
+            asset,
+            to,
+            amountWei,
+        }
+    },
+
+    bankUpdateAccountBudget(
+        bankAddress: string,
+        accountId: string,
+        asset: string,
+        newBudgetWei: bigint | number | string,
+        newAnnualLimitWei: bigint | number | string,
+    ): BuildDraftParams {
+        return {
+            category: 'BANK_UPDATE_ACCOUNT_BUDGET',
+            bankAddress,
+            accountId,
+            asset,
+            newBudgetWei,
+            newAnnualLimitWei,
+        }
+    },
+
+    bankCloseAccount(
+        bankAddress: string,
+        accountId: string,
+        asset: string,
+    ): BuildDraftParams {
+        return {
+            category: 'BANK_CLOSE_ACCOUNT',
+            bankAddress,
+            accountId,
+            asset,
+        }
     },
     multi(items: BuildDraftParams[]): BuildDraftParams { return { category: 'MULTI', items } },
     quorumDelta(dao: string, deltaBps: number): BuildDraftParams {

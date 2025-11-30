@@ -15,11 +15,11 @@ export const FLAGS = {
 // Admin AINs allowed to bypass create-DAO flag
 const adminEnv = String(import.meta.env.VITE_UGOV_DAO_ADMIN_AIN ?? '').trim()
 
-export const DAO_ADMINS: string[] = adminEnv
+export const UGOV_ADMINS: string[] = adminEnv
     ? adminEnv.split(',').map((s) => s.trim()).filter(Boolean)
     : []
 
-export function isDaoAdmin(ain?: string | null): boolean {
+export function isUGovAdmin(ain?: string | null): boolean {
     if (!ain) return false
-    return DAO_ADMINS.includes(ain)
+    return UGOV_ADMINS.includes(ain)
 }

@@ -8,7 +8,7 @@ import { setUserPrefsByAmid } from '../lib/firebase'
 import Identicon from './Identicon'
 import logo from '../assets/logotext.svg'
 import type { DAO as DAOType } from '../lib/dao'
-import { FLAGS, isDaoAdmin } from '../lib/flags'
+import { FLAGS, isUGovAdmin } from '../lib/flags'
 
 
 //type TopBarProps = { onMenu?: () => void }
@@ -88,7 +88,7 @@ export default function TopBar({ onMenu, menuOpen = false }: TopBarProps) {
 
   const ain = session?.ain
 
-  const canCreateDAO = FLAGS.canCreateDAO || isDaoAdmin(ain)
+  const canCreateDAO = FLAGS.canCreateDAO || isUGovAdmin(ain)
 
   // AIN popover state
   const [ainOpen, setAinOpen] = useState(false)
@@ -122,7 +122,7 @@ export default function TopBar({ onMenu, menuOpen = false }: TopBarProps) {
   }
 
   // DAO select handler (persist to users/{ain}.prefs.lastOpenDaoId)
-  const handleSelectDao = async (d: DAOType) => {
+  /* const handleSelectDao = async (d: DAOType) => {
     dlog('TopBar select DAO', { id: d.id })
     setCurrent(d)
     try {
@@ -134,7 +134,35 @@ export default function TopBar({ onMenu, menuOpen = false }: TopBarProps) {
     }
     // Re-render current route (no navigation change)
     nav(loc.pathname + loc.search, { replace: true })
+  } */
+
+  // DAO select handler (persist + hard reset to home)
+  const handleSelectDao = async (d: DAOType) => {
+    // no-op if already on this DAO
+    if (current?.id === d.id) {
+      return
+    }
+
+    dlog('TopBar select DAO (hard reset)', { from: current?.id, to: d.id })
+
+    try {
+      // Save preference first so on reload we open the same DAO
+      if (session?.ain) {
+        await setUserPrefsByAmid(session.ain, { lastOpenDaoId: d.id })
+      }
+    } catch (e) {
+      console.warn('[TopBar] persist lastOpenDaoId failed:', e)
+      // not fatal – still switch DAO
+    }
+
+    // Optional: update context for this render before reload
+    setCurrent(d)
+
+    // Full app reset: go to Overview + reload
+    // This clears all React component state, queries, etc.
+    window.location.href = '/'
   }
+
 
   useEffect(() => {
     if (menuOpen) setAinOpen(false)

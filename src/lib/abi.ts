@@ -61,6 +61,16 @@ export const DAO_ABI = [
 
 
 export const TREASURY_ABI = [
+    // errors
+    'error OnlySelf()',
+    'error OnlyDAO()',
+    'error OnlyDeployer()',
+    'error AlreadyDAO()',
+    'error LenMismatchTL()',
+    'error EmptyActionsTL()',
+    'error NotQueuedTL()',
+    'error TooEarlyTL()',
+    'error ExpiredTL()',
     // getters
     'function delay() view returns (uint32)',
     'function gracePeriod() view returns (uint32)',
@@ -121,3 +131,78 @@ export const ERC20_ABI = [
 export const AMID_REGISTRY_ABI = [
     'function ownerToId(address) view returns (bytes32)'
 ]
+
+
+
+
+export const DAO_BANK_FACTORY_ABI = [
+    // Errors
+    'error AddrZero()',
+
+    // Views
+    'function bankImpl() view returns (address)',
+    'function predictBankAddress(address controller, bytes32 salt) view returns (address)',
+
+    // Writes
+    'function createBank(address controller) returns (address)',
+    'function createBankDeterministic(address controller, bytes32 salt) returns (address)',
+
+    // Events
+    'event BankCreated(address indexed bank,address indexed controller,bytes32 indexed salt)',
+] as const
+
+
+export const DAO_BANK_ABI = [
+    // Errors
+    'error OnlyController()',
+    'error AlreadyInited()',
+    'error AccountExists()',
+    'error AccountUnknown()',
+    'error ZeroAddress()',
+    'error ZeroAmount()',
+    'error BudgetTooLarge()',
+    'error AnnualCapExceeded()',
+    'error InsufficientBudget()',
+
+    // Views / storage
+    'function controller() view returns (address)',
+    'function accounts(bytes32 accountId,address asset) view returns (uint256 budget,uint256 annualLimit,uint256 spentThisYear,uint64 yearIndex,bool exists)',
+    'function totalBudgetForAsset(address asset) view returns (uint256)',
+
+    // Init / admin
+    'function initialize(address _controller)',
+    'function updateController(address newController)',
+
+    // Account management
+    'function createAccount(bytes32 accountId,address asset,uint256 budget,uint256 annualLimit)',
+    'function updateAccountBudget(bytes32 accountId,address asset,uint256 newBudget,uint256 newAnnualLimit)',
+    'function closeAccount(bytes32 accountId,address asset)',
+    'function updateAnnualCap(bytes32 accountId,address asset,uint256 newAnnualLimit)',
+
+    // Spending
+    'function spendFromAccount(bytes32 accountId,address asset,address to,uint256 amount)',
+
+    // Deposits
+    'function depositNative() payable',
+    'function depositERC20(address token,uint256 amount)',
+
+    // Views
+    'function getAccountInfo(bytes32 accountId,address asset) view returns (bool exists,uint256 budget,uint256 annualLimit,uint256 spentThisYear,uint64 yearIndex)',
+    'function getAssetBudgetState(address asset) view returns (uint256 balance,uint256 totalBudget,uint256 unallocated)',
+
+    // Safety / migration
+    'function rescueNative(address to,uint256 amount)',
+    'function rescueERC20(address token,address to,uint256 amount)',
+
+    // Events
+    'event ControllerUpdated(address indexed oldController,address indexed newController)',
+    'event AccountCreated(bytes32 indexed accountId,address indexed asset,uint256 budget,uint256 annualLimit)',
+    'event AccountBudgetUpdated(bytes32 indexed accountId,address indexed asset,uint256 oldBudget,uint256 newBudget,uint256 annualLimit)',
+    'event AccountClosed(bytes32 indexed accountId,address indexed asset,uint256 releasedBudget)',
+    'event AnnualCapUpdated(bytes32 indexed accountId,address indexed asset,uint256 newAnnualLimit)',
+    'event AccountSpent(bytes32 indexed accountId,address indexed asset,address indexed to,uint256 amount,uint64 yearIndex,uint256 spentThisYear,uint256 remainingBudget)',
+    'event NativeDeposited(address indexed from,uint256 amount)',
+    'event ERC20Deposited(address indexed token,address indexed from,uint256 amount)',
+    'event NativeRescued(address indexed to,uint256 amount)',
+    'event ERC20Rescued(address indexed token,address indexed to,uint256 amount)',
+] as const

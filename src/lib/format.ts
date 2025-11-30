@@ -1,3 +1,5 @@
+import { ethers } from "ethers"
+
 export function formatLocalId(id: string | number | null | undefined) {
     const s = String(id ?? '').trim()
     if (!s) return '—'
@@ -46,4 +48,32 @@ export function formatTimeAgo(v: any): string {
     if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`
     const years = Math.floor(days / 365)
     return `${years} year${years === 1 ? '' : 's'} ago`
+}
+
+
+/**
+ * Pretty-print a bank amount:
+ *  - If it's big enough, show in AKE (or token symbol)
+ *  - If it's tiny, show in wei so it doesn't look like 0
+ */
+export function formatBankAmount(
+    raw: bigint,
+    opts?: { symbol?: string; decimals?: number }
+): string {
+    const symbol = opts?.symbol ?? 'AKE'
+    const decimals = opts?.decimals ?? 18
+
+    if (raw === 0n) return `0 ${symbol}`
+
+    // Full decimal string (e.g. "0.000000000000000001")
+    const full = ethers.formatUnits(raw, decimals)
+    const num = parseFloat(full)
+
+    // If it's at least 0.0001 in "token" units, show as token
+    if (num >= 0.0001) {
+        return `${num.toFixed(4)} ${symbol}`
+    }
+
+    // Otherwise show raw wei so user sees *something*
+    return `${raw.toString()} akoes`
 }

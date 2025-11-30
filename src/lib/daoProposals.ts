@@ -672,7 +672,7 @@ export async function queueOnchain(
 ): Promise<{ txHash: string }> {
   const data = iface.encodeFunctionData('queue', [BigInt(id as any)])
   const txHash = await sendTransaction(
-    { chainId: CHAIN.id, to: daoAddress, data, gas: 180_000 },
+    { chainId: CHAIN.id, to: daoAddress, data, gas: 1_180_000 },
     {
       app: 'uGov',
       amvaultUrl: import.meta.env.VITE_AMVAULT_URL,
@@ -682,6 +682,8 @@ export async function queueOnchain(
   await waitReceipt(txHash)
   return { txHash }
 }
+
+
 
 
 
@@ -784,45 +786,72 @@ export async function simulateExecute(
   const provider =
     opts?.provider ?? new ethers.JsonRpcProvider(CHAIN.rpcUrl, CHAIN.id)
 
+  const dao = new ethers.Contract(daoAddress, DAO_ABI, provider)
   const daoIface = new ethers.Interface(DAO_ABI)
+  const treasIface = new ethers.Interface(TREASURY_ABI)
 
-  // --- DAO-level simulate (version-agnostic)
-  const daoData = daoIface.encodeFunctionData('execute', [BigInt(args.localId)])
+  const localId = BigInt(args.localId)
+  const daoData = daoIface.encodeFunctionData('execute', [localId])
+
   try {
+    // If this succeeds, DAO + Treasury + targets all simulate fine
     await provider.call({ to: daoAddress, data: daoData })
-    return // simulation ok; nothing will revert
+    return
   } catch (e: any) {
-    const reason = extractRevertReason(e)
+    const rawData =
+      e?.data ?? e?.error?.data ?? e?.info?.error?.data ?? e?.error?.error?.data
 
-    // If DAO says EXEC_FAIL, run a deeper treasury preflight to get the real reason
-    if (/EXEC_FAIL/i.test(reason)) {
-      const dao = new ethers.Contract(daoAddress, DAO_ABI, provider)
-      const [targets, values, calldatas, descHash] = await dao.getActions(
-        BigInt(args.localId)
-      )
-      const treasuryAddr: string = await dao.treasury()
-
-      const treasIface = new ethers.Interface(TREASURY_ABI)
-      const treasData = treasIface.encodeFunctionData('execute', [
-        targets,
-        values,
-        calldatas,
-        descHash as Hex,
-      ])
-
+    // If we got raw revert data, try to decode as custom errors first
+    if (rawData) {
+      // 1) Try DAO custom error (NotQueued, Held, AlreadyExecuted, etc.)
       try {
-        await provider.call({ to: treasuryAddr, data: treasData })
-        // Treasury succeeded; original EXEC_FAIL likely came from a different DAO require
-        throw new Error(`Preflight (DAO) failed: ${reason}`)
-      } catch (e2: any) {
-        throw new Error(`Preflight (Treasury) failed: ${extractRevertReason(e2)}`)
+        const parsedDao = daoIface.parseError(rawData)
+        throw new Error(
+          `Preflight (DAO) failed: ${parsedDao.name}${parsedDao.args && parsedDao.args.length
+            ? `(${parsedDao.args.join(', ')})`
+            : ''
+          }`
+        )
+      } catch {
+        // ignore and fall through
       }
+
+      // 2) Try Treasury custom errors (TooEarlyTL, ExpiredTL, NotQueuedTL, etc.)
+      try {
+        const parsedTreasury = treasIface.parseError(rawData)
+        throw new Error(
+          `Preflight (Treasury) failed: ${parsedTreasury.name}${parsedTreasury.args && parsedTreasury.args.length
+            ? `(${parsedTreasury.args.join(', ')})`
+            : ''
+          }`
+        )
+      } catch {
+        // ignore and fall through
+      }
+
+      // 3) Try generic Error(string)
+      try {
+        const genericIface = new ethers.Interface(['error Error(string)'])
+        const [reasonStr] = genericIface.decodeErrorResult('Error', rawData)
+        throw new Error(`Preflight (DAO) failed: ${reasonStr}`)
+      } catch {
+        // ignore and fall through
+      }
+
+      // 4) Fallback: show the raw selector so at least we can match it
+      throw new Error(
+        `Preflight (DAO) failed: unknown custom error (data=${rawData})`
+      )
     }
 
-    // Other DAO errors (NotQueued, AlreadyExecuted, etc.)
-    throw new Error(`Preflight (DAO) failed: ${reason}`)
+    // No raw data? Fall back to the string reason (rare)
+    const reason = extractRevertReason(e)
+    throw new Error(`Preflight (DAO) failed: ${reason || 'execution reverted'}`)
   }
 }
+
+
+
 
 // --- actual execution
 export async function executeOnchain(
@@ -832,7 +861,7 @@ export async function executeOnchain(
 ): Promise<{ txHash: string }> {
   const data = iface.encodeFunctionData('execute', [BigInt(id as any)])
   const txHash = await sendTransaction(
-    { chainId: CHAIN.id, to: daoAddress, data, gas: 400_000 },
+    { chainId: CHAIN.id, to: daoAddress, data, gas: 1_400_000 },
     {
       app: 'uGov',
       amvaultUrl: import.meta.env.VITE_AMVAULT_URL,

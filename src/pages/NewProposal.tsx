@@ -18,6 +18,8 @@ type BankAction = (typeof BANK_ACTIONS)[number]['value']
 type BankNewAccountRow = {
   account: string   // id / name
   asset: string
+  budgetWei: string
+  annualLimitWei: string
   note: string
 }
 
@@ -57,6 +59,8 @@ type FormState = {
   bankAsset?: string
   bankRecipient?: string
   bankNote?: string
+  bankBudgetWei?: string
+  bankAnnualLimitWei?: string
 
   // BANK (multi-create)
   bankNewAccounts: BankNewAccountRow[]
@@ -122,6 +126,8 @@ export default function NewProposal() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'edit' | 'preview'>('edit')
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
   const loc = useLocation() as any
 
   const prefill = (loc as any)?.state?.prefill || {};
@@ -173,18 +179,32 @@ export default function NewProposal() {
       newToken: pf.newToken ?? f.newToken,
       cancelTargetId: pf.cancelTargetId ?? f.cancelTargetId,
 
-      // BANK (multi-create)
+      // 🏦 BANK (single-action fields)
+      bankAction: (pf.bank?.actionType as BankAction) ?? f.bankAction,
+      bankAccount: pf.bank?.account ?? f.bankAccount,
+      bankAmount:
+        pf.bank?.amount != null
+          ? String(pf.bank.amount)
+          : f.bankAmount,
+      bankAsset: pf.bank?.asset ?? f.bankAsset,
+      bankRecipient: pf.bank?.recipient ?? f.bankRecipient,
+      bankNote: pf.bank?.note ?? f.bankNote,
+      bankBudgetWei: pf.bank?.budgetWei ?? f.bankBudgetWei,             // 🔹 NEW
+      bankAnnualLimitWei: pf.bank?.annualLimitWei ?? f.bankAnnualLimitWei, // 🔹 NEW
+
+      // 🏦 BANK (multi-create rows)
       bankNewAccounts:
         Array.isArray(pf.bank?.createAccounts) && pf.bank.createAccounts.length
           ? pf.bank.createAccounts.map((r: any) => ({
             account: r.account ?? '',
             asset: r.asset ?? ASSETS[0],
+            budgetWei: r.budgetWei ?? '',
+            annualLimitWei: r.annualLimitWei ?? '',
             note: r.note ?? '',
           }))
           : (f.bankNewAccounts?.length
             ? f.bankNewAccounts
-            : [{ account: '', asset: ASSETS[0], note: '' }]),
-
+            : [{ account: '', asset: ASSETS[0], budgetWei: '', annualLimitWei: '', note: '' }]),
 
       // meta
       discussionUrl: pf.discussionUrl ?? f.discussionUrl,
@@ -195,6 +215,7 @@ export default function NewProposal() {
       history.replaceState({}, document.title, location.pathname)
     }
   }, [loc])
+
 
 
 
@@ -229,8 +250,10 @@ export default function NewProposal() {
       bankAsset: ASSETS[0],
       bankRecipient: '',
       bankNote: '',
+      bankBudgetWei: '',          // 🔹 NEW
+      bankAnnualLimitWei: '',     // 🔹 NEW
       bankNewAccounts: [
-        { account: '', asset: ASSETS[0], note: '' },
+        { account: '', asset: ASSETS[0], budgetWei: '', annualLimitWei: '', note: '' },
       ],
     }
 
@@ -323,6 +346,14 @@ export default function NewProposal() {
       if (form.bankAction === 'CONFIG') {
         if (!form.bankAccount?.trim()) return 'Bank account is required for configuration.'
         if (!form.bankNote?.trim()) return 'Describe the bank account update.'
+
+        // 🔹 Optional but must be numeric if provided
+        if (form.bankBudgetWei?.trim() && !/^\d+$/.test(form.bankBudgetWei.trim())) {
+          return 'Budget must be a numeric value.'
+        }
+        if (form.bankAnnualLimitWei?.trim() && !/^\d+$/.test(form.bankAnnualLimitWei.trim())) {
+          return 'Annual limit must be a numeric value.'
+        }
       }
 
       if (form.bankAction === 'CLOSE') {
@@ -338,6 +369,16 @@ export default function NewProposal() {
         }
         const badAsset = used.find(r => !r.asset?.trim())
         if (badAsset) return 'Each new account must have an asset selected.'
+
+        const badBudget = used.find(
+          r => !r.budgetWei.trim() || !/^\d+$/.test(r.budgetWei.trim())
+        )
+        if (badBudget) return 'Each new account must have a numeric budget.'
+
+        const badAnnual = used.find(
+          r => !r.annualLimitWei.trim() || !/^\d+$/.test(r.annualLimitWei.trim())
+        )
+        if (badAnnual) return 'Each new account must have a numeric annual limit.'
       }
     }
 
@@ -412,10 +453,18 @@ export default function NewProposal() {
           `from account "${form.bankAccount || '?'}" to \`${form.bankRecipient || '0x…'}\``
         )
       } else if (form.bankAction === 'CONFIG') {
-        header.push(
-          `**Bank Action:** Update account "${form.bankAccount || '?'}"${form.bankNote ? ` – ${form.bankNote}` : ''
-          }`
-        )
+        let line =
+          `**Bank Action:** Update account "${form.bankAccount || '?'}"${form.bankNote ? ` – ${form.bankNote}` : ''}`
+
+        if (form.bankAsset || form.bankBudgetWei || form.bankAnnualLimitWei) {
+          const parts: string[] = []
+          if (form.bankAsset) parts.push(`asset: ${form.bankAsset}`)
+          if (form.bankBudgetWei) parts.push(`budget: ${form.bankBudgetWei}`)
+          if (form.bankAnnualLimitWei) parts.push(`annual limit: ${form.bankAnnualLimitWei}`)
+          line += ` (${parts.join(', ')})`
+        }
+
+        header.push(line)
       } else if (form.bankAction === 'CLOSE') {
         header.push(
           `**Bank Action:** Close account "${form.bankAccount || '?'}"`
@@ -426,10 +475,13 @@ export default function NewProposal() {
           header.push('**Bank Action:** Create new account(s):')
           used.slice(0, MAX_BANK_NEW_ACCOUNTS).forEach((row, idx) => {
             header.push(
-              `- #${idx + 1}: "${row.account}" (${row.asset || 'AKE'})${row.note ? ` – ${row.note}` : ''
-              }`
+              `- #${idx + 1}: "${row.account}" (${row.asset || 'AKE'})` +
+              `${row.budgetWei ? ` – budget: ${row.budgetWei} wei` : ''}` +
+              `${row.annualLimitWei ? `, annual limit: ${row.annualLimitWei} wei` : ''}` +
+              `${row.note ? ` – ${row.note}` : ''}`
             )
           })
+
         }
       }
     }
@@ -505,15 +557,24 @@ export default function NewProposal() {
                 amount: form.bankAction === 'SPEND'
                   ? (form.bankAmount ? Number(form.bankAmount) : null)
                   : null,
-                asset: form.bankAction === 'SPEND'
-                  ? form.bankAsset || null
-                  : null,
+                asset:
+                  form.bankAction === 'SPEND' || form.bankAction === 'CONFIG'
+                    ? form.bankAsset || null
+                    : null,
                 recipient: form.bankAction === 'SPEND'
                   ? form.bankRecipient?.trim() || null
                   : null,
                 note:
-                  form.bankAction === 'CONFIG' || form.bankAction === 'CLOSE'
+                  form.bankAction === 'CONFIG' || form.bankAction === 'CLOSE' || form.bankAction === 'SPEND'
                     ? form.bankNote?.trim() || null
+                    : null,
+                budgetWei:
+                  form.bankAction === 'CONFIG'
+                    ? (form.bankBudgetWei?.trim() || null)
+                    : null,
+                annualLimitWei:
+                  form.bankAction === 'CONFIG'
+                    ? (form.bankAnnualLimitWei?.trim() || null)
                     : null,
                 createAccounts:
                   form.bankAction === 'CREATE'
@@ -523,12 +584,15 @@ export default function NewProposal() {
                       .map(r => ({
                         account: r.account.trim(),
                         asset: r.asset || null,
+                        budgetWei: r.budgetWei?.trim() || null,
+                        annualLimitWei: r.annualLimitWei?.trim() || null,
                         note: r.note?.trim() || null,
                       }))
                     : null,
               },
             }
             : { bank: null }),
+
 
 
           // Category-specific fields, same logic as create
@@ -620,6 +684,8 @@ export default function NewProposal() {
           bankPayload.createAccounts = rows.map(r => ({
             account: r.account.trim(),
             asset: r.asset || null,
+            budgetWei: r.budgetWei?.trim() || null,
+            annualLimitWei: r.annualLimitWei?.trim() || null,
             note: r.note?.trim() || null,
           }))
         }
@@ -670,11 +736,31 @@ export default function NewProposal() {
           ? {
             bank: {
               actionType: form.bankAction || null,
-              account: form.bankAccount?.trim() || null,
-              amount: form.bankAmount ? Number(form.bankAmount) : null,
-              asset: form.bankAsset || null,
-              recipient: form.bankRecipient?.trim() || null,
-              note: form.bankNote?.trim() || null,
+              account: form.bankAction === 'CREATE'
+                ? null
+                : form.bankAccount?.trim() || null,
+              amount: form.bankAction === 'SPEND'
+                ? (form.bankAmount ? Number(form.bankAmount) : null)
+                : null,
+              asset:
+                form.bankAction === 'SPEND' || form.bankAction === 'CONFIG'
+                  ? form.bankAsset || null
+                  : null,
+              recipient: form.bankAction === 'SPEND'
+                ? form.bankRecipient?.trim() || null
+                : null,
+              note:
+                form.bankAction === 'CONFIG' || form.bankAction === 'CLOSE' || form.bankAction === 'SPEND'
+                  ? form.bankNote?.trim() || null
+                  : null,
+              budgetWei:
+                form.bankAction === 'CONFIG'
+                  ? (form.bankBudgetWei?.trim() || null)
+                  : null,
+              annualLimitWei:
+                form.bankAction === 'CONFIG'
+                  ? (form.bankAnnualLimitWei?.trim() || null)
+                  : null,
               createAccounts:
                 form.bankAction === 'CREATE'
                   ? (form.bankNewAccounts || [])
@@ -683,12 +769,15 @@ export default function NewProposal() {
                     .map(r => ({
                       account: r.account.trim(),
                       asset: r.asset || null,
+                      budgetWei: r.budgetWei?.trim() || null,
+                      annualLimitWei: r.annualLimitWei?.trim() || null,
                       note: r.note?.trim() || null,
                     }))
                   : null,
             },
           }
           : {}),
+
 
 
         ...(category === 'VOTING_CONFIG'
@@ -914,13 +1003,9 @@ export default function NewProposal() {
         {/* BANK */}
         {isBank && (
           <div className="space-y-4 border rounded-xl p-4 bg-slate-50/60">
-            <div className="text-sm text-slate-700">
-              These actions operate on the DAO&apos;s <strong>Bank contract</strong>,
-              not directly on the timelock treasury.
-            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
+              <div className="md:col-span-2">
                 <div className="label">Bank Action</div>
                 <select
                   className="select"
@@ -993,17 +1078,61 @@ export default function NewProposal() {
             )}
 
             {form.bankAction === 'CONFIG' && (
-              <div>
-                <div className="label">Account Change Summary</div>
-                <textarea
-                  className="textarea"
-                  placeholder="Describe the limit / routing / account configuration change."
-                  rows={3}
-                  value={form.bankNote}
-                  onChange={e => setForm(f => ({ ...f, bankNote: e.target.value }))}
-                />
+              <div className="space-y-3">
+                <div>
+                  <div className="label">Account Change Summary</div>
+                  <textarea
+                    className="textarea"
+                    placeholder="Describe the limit / routing / account configuration change."
+                    rows={3}
+                    value={form.bankNote}
+                    onChange={e => setForm(f => ({ ...f, bankNote: e.target.value }))}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <div className="label">Asset</div>
+                    <select
+                      className="select"
+                      value={form.bankAsset}
+                      onChange={e =>
+                        setForm(f => ({ ...f, bankAsset: e.target.value }))
+                      }
+                    >
+                      {ASSETS.map(a => (
+                        <option key={a} value={a}>{a}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="label">Budget</div>
+                    <input
+                      className="input font-mono"
+                      placeholder="e.g., 1000000000000000000"
+                      value={form.bankBudgetWei}
+                      onChange={e =>
+                        setForm(f => ({ ...f, bankBudgetWei: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <div className="label">Annual limit</div>
+                    <input
+                      className="input font-mono"
+                      placeholder="e.g., 500000000000000000"
+                      value={form.bankAnnualLimitWei}
+                      onChange={e =>
+                        setForm(f => ({ ...f, bankAnnualLimitWei: e.target.value }))
+                      }
+                    />
+                  </div>
+                </div>
               </div>
             )}
+
 
             {form.bankAction === 'CLOSE' && (
               <div className="text-xs text-red-700">
@@ -1023,25 +1152,32 @@ export default function NewProposal() {
                     onClick={() =>
                       setForm(f => {
                         if (f.bankNewAccounts.length >= MAX_BANK_NEW_ACCOUNTS) return f
+
+                        const newRow: BankNewAccountRow = {
+                          account: '',
+                          asset: ASSETS[0],
+                          budgetWei: '',
+                          annualLimitWei: '',
+                          note: '',
+                        }
+
                         return {
                           ...f,
-                          bankNewAccounts: [
-                            ...f.bankNewAccounts,
-                            { account: '', asset: ASSETS[0], note: '' },
-                          ],
+                          bankNewAccounts: [...f.bankNewAccounts, newRow],
                         }
                       })
                     }
                   >
                     + Add account
                   </button>
+
                 </div>
 
                 <div className="space-y-3">
                   {form.bankNewAccounts.map((row, idx) => (
                     <div
                       key={idx}
-                      className="grid grid-cols-1 md:grid-cols-3 gap-3 border rounded-lg p-3 bg-white/70"
+                      className="grid grid-cols-1 md:grid-cols-4 gap-3 border rounded-lg p-3 bg-white/70"
                     >
                       <div>
                         <div className="label">Account ID / Name #{idx + 1}</div>
@@ -1058,6 +1194,7 @@ export default function NewProposal() {
                           }
                         />
                       </div>
+
                       <div>
                         <div className="label">Asset</div>
                         <select
@@ -1074,7 +1211,40 @@ export default function NewProposal() {
                           {ASSETS.map(a => <option key={a} value={a}>{a}</option>)}
                         </select>
                       </div>
-                      <div className="md:col-span-3">
+
+                      <div>
+                        <div className="label">Budget</div>
+                        <input
+                          className="input font-mono"
+                          placeholder="e.g., 1000000000000000000"
+                          value={row.budgetWei}
+                          onChange={e =>
+                            setForm(f => {
+                              const next = [...f.bankNewAccounts]
+                              next[idx] = { ...next[idx], budgetWei: e.target.value }
+                              return { ...f, bankNewAccounts: next }
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <div className="label">Annual limit</div>
+                        <input
+                          className="input font-mono"
+                          placeholder="e.g., 500000000000000000"
+                          value={row.annualLimitWei}
+                          onChange={e =>
+                            setForm(f => {
+                              const next = [...f.bankNewAccounts]
+                              next[idx] = { ...next[idx], annualLimitWei: e.target.value }
+                              return { ...f, bankNewAccounts: next }
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div className="md:col-span-4">
                         <div className="label flex items-center justify-between">
                           <span>Note / Purpose</span>
                           {form.bankNewAccounts.length > 1 && (
@@ -1092,10 +1262,11 @@ export default function NewProposal() {
                             </button>
                           )}
                         </div>
-                        <textarea
-                          className="textarea"
-                          rows={2}
-                          placeholder="Describe how this account will be used."
+
+                        <input
+                          className="input"
+                          maxLength={160} // one short sentence
+                          placeholder="Short one-line purpose (e.g., Grants pool)"
                           value={row.note}
                           onChange={e =>
                             setForm(f => {
@@ -1108,6 +1279,7 @@ export default function NewProposal() {
                       </div>
                     </div>
                   ))}
+
                 </div>
               </div>
             )}
@@ -1145,28 +1317,48 @@ export default function NewProposal() {
           </div>
         )}
 
-        {/* References + Discussion */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <div className="label">Discussion URL (optional)</div>
-            <input
-              className="input"
-              placeholder="https://forum.example.com/thread/123"
-              value={form.discussionUrl}
-              onChange={(e) => setForm(f => ({ ...f, discussionUrl: e.target.value }))}
-            />
-          </div>
-          <div>
-            <div className="label">References (one URL per line)</div>
-            <textarea
-              className="textarea font-mono"
-              placeholder="https://alkebuleum.org/whitepaper.pdf"
-              value={form.references}
-              onChange={(e) => setForm(f => ({ ...f, references: e.target.value }))}
-              rows={3}
-            />
-          </div>
+        {/* Advanced: Discussion + References */}
+        <div className="border rounded-xl p-3 bg-slate-50/60">
+          <button
+            type="button"
+            className="flex items-center justify-between w-full text-sm text-slate-700"
+            onClick={() => setShowAdvanced(v => !v)}
+          >
+            <span>Advanced options</span>
+            <span className="text-xs text-slate-500">
+              {showAdvanced ? 'Hide' : 'Show'}
+            </span>
+          </button>
+
+          {showAdvanced && (
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className="label">Discussion URL (optional)</div>
+                <input
+                  className="input"
+                  placeholder="https://forum.example.com/thread/123"
+                  value={form.discussionUrl}
+                  onChange={(e) =>
+                    setForm(f => ({ ...f, discussionUrl: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <div className="label">References (one URL per line)</div>
+                <textarea
+                  className="textarea font-mono"
+                  placeholder="https://alkebuleum.org/whitepaper.pdf"
+                  value={form.references}
+                  onChange={(e) =>
+                    setForm(f => ({ ...f, references: e.target.value }))
+                  }
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
         </div>
+
 
         {/* Editor / Preview */}
         <div className="flex gap-2">
