@@ -2,14 +2,13 @@
 import { ethers } from 'ethers'
 import { CHAIN } from './chain'
 import { sendTransaction } from 'amvault-connect'
-import { Hex } from './firebase'
 import { BOND_MGR_ABI, DAO_ABI, TOKEN_ABI, TREASURY_ABI } from './abi'
 
 // daoProposals.ts (patch)
 
 
 const DaoI = new ethers.Interface(DAO_ABI)
-export const BLOCK_TIME_SEC = 10
+export const BLOCK_TIME_SEC = 5
 const iface = new ethers.Interface(DAO_ABI)
 
 //type PopupOpt = { popup?: Window | null; timeoutMs?: number }

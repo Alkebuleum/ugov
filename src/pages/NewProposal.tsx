@@ -476,8 +476,8 @@ export default function NewProposal() {
           used.slice(0, MAX_BANK_NEW_ACCOUNTS).forEach((row, idx) => {
             header.push(
               `- #${idx + 1}: "${row.account}" (${row.asset || 'AKE'})` +
-              `${row.budgetWei ? ` – budget: ${row.budgetWei} wei` : ''}` +
-              `${row.annualLimitWei ? `, annual limit: ${row.annualLimitWei} wei` : ''}` +
+              `${row.budgetWei ? ` – budget: ${row.budgetWei}` : ''}` +
+              `${row.annualLimitWei ? `, annual limit: ${row.annualLimitWei}` : ''}` +
               `${row.note ? ` – ${row.note}` : ''}`
             )
           })
